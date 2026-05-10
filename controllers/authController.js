@@ -60,6 +60,55 @@ exports.adminLogin = async (req, res) => {
     }
 };
 
+// ==================== SUPER ADMIN SETUP (ONE-TIME) ====================
+
+exports.setupSuperAdmin = async (req, res) => {
+    try {
+        const { name, email, password } = req.body;
+        
+        // Check if super admin already exists
+        const existing = await User.findOne({ role: "superadmin" });
+        if (existing) {
+            return res.status(400).json({ message: "Super admin already exists. Setup disabled." });
+        }
+        
+        // Validate input
+        if (!email || !password) {
+            return res.status(400).json({ message: "Email and password are required" });
+        }
+        
+        if (password.length < 6) {
+            return res.status(400).json({ message: "Password must be at least 6 characters" });
+        }
+        
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        
+        // Create super admin
+        const user = new User({
+            name: name || "Super Administrator",
+            email: email,
+            password: hashedPassword,
+            role: "superadmin",
+            isActive: true,
+        });
+        
+        await user.save();
+        
+        console.log("✅ Super admin created:", email);
+        
+        res.status(201).json({ 
+            success: true,
+            message: "Super admin created successfully!",
+            user: { email: user.email, role: user.role }
+        });
+    } catch (error) {
+        console.error("Setup error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // ==================== PROFILE FUNCTIONS ====================
 
 exports.getProfile = async (req, res) => {
@@ -92,7 +141,6 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
-// Setup security questions for recovery
 exports.setupSecurity = async (req, res) => {
     try {
         const { securityQuestion, securityAnswer } = req.body;
@@ -133,7 +181,6 @@ exports.changePassword = async (req, res) => {
 
 // ==================== FORGOT SCHOOL CODE - SELF RECOVERY ====================
 
-// Step 1: Request school code recovery via phone or security question
 exports.requestSchoolCodeRecovery = async (req, res) => {
     try {
         const { email, phone } = req.body;
@@ -147,7 +194,6 @@ exports.requestSchoolCodeRecovery = async (req, res) => {
         
         if (!user || !user.school) return res.status(404).json({ message: "No account found" });
         
-        // Generate recovery token
         const recoveryToken = generateOTP();
         user.resetOtp = recoveryToken;
         user.resetOtpExpires = new Date(Date.now() + 10 * 60000);
@@ -158,19 +204,17 @@ exports.requestSchoolCodeRecovery = async (req, res) => {
         console.log("=".repeat(60));
         console.log(`User: ${user.name}`);
         console.log(`Email: ${user.email}`);
-        console.log(`Phone: ${user.phone || "Not set"}`);
         console.log(`School: ${user.school.name}`);
         console.log(`School Code: ${user.school.schoolCode}`);
         console.log(`Verification Token: ${recoveryToken}`);
         console.log("=".repeat(60) + "\n");
         
-        // Check if user has security question set
         const hasSecurity = user.securityQuestion && user.securityAnswer;
         
         res.json({ 
-            message: hasSecurity ? "Verification code generated. Check server console." : "Please contact your school administrator for the school code.",
+            message: hasSecurity ? "Verification code generated. Check server console." : "Please contact your school administrator.",
             requiresSecurityQuestion: hasSecurity,
-            recoveryToken: recoveryToken // For testing only - remove in production
+            recoveryToken: recoveryToken
         });
     } catch (error) {
         console.error("Request recovery error:", error);
@@ -178,7 +222,6 @@ exports.requestSchoolCodeRecovery = async (req, res) => {
     }
 };
 
-// Step 2: Verify security question answer
 exports.verifySecurityAnswer = async (req, res) => {
     try {
         const { email, answer, recoveryToken } = req.body;
@@ -191,14 +234,13 @@ exports.verifySecurityAnswer = async (req, res) => {
         }
         
         if (new Date() > user.resetOtpExpires) {
-            return res.status(401).json({ message: "Recovery token expired. Please request again." });
+            return res.status(401).json({ message: "Recovery token expired" });
         }
         
         if (user.securityAnswer !== answer.toLowerCase().trim()) {
             return res.status(401).json({ message: "Incorrect security answer" });
         }
         
-        // Clear recovery token after successful verification
         user.resetOtp = null;
         user.resetOtpExpires = null;
         await user.save();
@@ -216,22 +258,20 @@ exports.verifySecurityAnswer = async (req, res) => {
 
 // ==================== FORGOT PASSWORD - SELF RESET ====================
 
-// Request password reset (verifies via security question)
 exports.requestPasswordReset = async (req, res) => {
     try {
         const { email } = req.body;
         
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ message: "No account found with this email" });
+        if (!user) return res.status(404).json({ message: "No account found" });
         
         if (!user.securityQuestion || !user.securityAnswer) {
             return res.status(400).json({ 
-                message: "Security questions not set. Please contact your school administrator to reset your password.",
+                message: "Security questions not set. Please contact your school administrator.",
                 needsSecuritySetup: true
             });
         }
         
-        // Generate reset token
         const resetToken = generateOTP();
         user.resetOtp = resetToken;
         user.resetOtpExpires = new Date(Date.now() + 10 * 60000);
@@ -247,9 +287,9 @@ exports.requestPasswordReset = async (req, res) => {
         console.log("=".repeat(60) + "\n");
         
         res.json({ 
-            message: "Reset token generated. Check server console for verification code.",
+            message: "Reset token generated. Check server console.",
             securityQuestion: user.securityQuestion,
-            resetToken: resetToken // For testing only - remove in production
+            resetToken: resetToken
         });
     } catch (error) {
         console.error("Request reset error:", error);
@@ -257,7 +297,6 @@ exports.requestPasswordReset = async (req, res) => {
     }
 };
 
-// Verify security answer and reset password
 exports.verifyAndResetPassword = async (req, res) => {
     try {
         const { email, answer, resetToken, newPassword } = req.body;
@@ -274,7 +313,7 @@ exports.verifyAndResetPassword = async (req, res) => {
         }
         
         if (new Date() > user.resetOtpExpires) {
-            return res.status(401).json({ message: "Reset token expired. Please request again." });
+            return res.status(401).json({ message: "Reset token expired" });
         }
         
         if (user.securityAnswer !== answer.toLowerCase().trim()) {
@@ -296,13 +335,12 @@ exports.verifyAndResetPassword = async (req, res) => {
     }
 };
 
-// Legacy forgot password (with security question)
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
         
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ message: "No account found with this email" });
+        if (!user) return res.status(404).json({ message: "No account found" });
         
         if (!user.securityQuestion || !user.securityAnswer) {
             return res.status(400).json({ 
@@ -344,7 +382,7 @@ exports.verifyResetOtp = async (req, res) => {
         }
         
         if (new Date() > user.resetOtpExpires) {
-            return res.status(401).json({ message: "Code expired. Please request again." });
+            return res.status(401).json({ message: "Code expired" });
         }
         
         if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {
@@ -374,7 +412,7 @@ exports.resetPassword = async (req, res) => {
         }
         
         if (new Date() > user.resetOtpExpires) {
-            return res.status(401).json({ message: "Code expired. Please request again." });
+            return res.status(401).json({ message: "Code expired" });
         }
         
         if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {
@@ -394,7 +432,6 @@ exports.resetPassword = async (req, res) => {
     }
 };
 
-// Forgot School Code - Self recovery
 exports.forgotSchoolCode = async (req, res) => {
     try {
         const { email, securityAnswer } = req.body;
@@ -403,7 +440,7 @@ exports.forgotSchoolCode = async (req, res) => {
         if (!user || !user.school) return res.status(404).json({ message: "No account found" });
         
         if (!user.securityQuestion || !user.securityAnswer) {
-            return res.status(400).json({ message: "Security questions not set. Please contact your school administrator." });
+            return res.status(400).json({ message: "Security questions not set" });
         }
         
         if (user.securityAnswer !== securityAnswer?.toLowerCase().trim()) {

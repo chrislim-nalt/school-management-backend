@@ -4,6 +4,7 @@ const auth = require("../middleware/authMiddleware");
 const { 
     login, 
     adminLogin, 
+    setupSuperAdmin,
     getProfile, 
     updateProfile, 
     changePassword,
@@ -31,7 +32,7 @@ router.post("/reset-password", resetPassword);
 // School code recovery (with security questions)
 router.post("/forgot-school-code", forgotSchoolCode);
 
-// NEW: Self-recovery endpoints
+// Self-recovery endpoints
 router.post("/request-school-code-recovery", requestSchoolCodeRecovery);
 router.post("/verify-security-answer", verifySecurityAnswer);
 router.post("/request-password-reset", requestPasswordReset);
