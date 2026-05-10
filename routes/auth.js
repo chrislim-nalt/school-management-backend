@@ -21,6 +21,7 @@ const {
 // Public routes
 router.post("/login", login);
 router.post("/admin-login", adminLogin);
+router.post("/setup-superadmin", setupSuperAdmin);
 
 // Password reset (with security questions)
 router.post("/forgot-password", forgotPassword);
