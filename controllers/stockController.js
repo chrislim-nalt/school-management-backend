@@ -5,7 +5,10 @@ const Item = require("../models/Item");
 exports.getTransactions = async (req, res) => {
   try {
     const transactions = await StockTransaction.find({ school: req.user.schoolId })
-      .populate("item", "name unit")
+      .populate({
+        path: "item",
+        populate: { path: "category" }
+      })
       .sort({ createdAt: -1 });
     res.json(transactions);
   } catch (error) {
@@ -57,7 +60,10 @@ exports.createTransaction = async (req, res) => {
     await foundItem.save();
 
     const populatedTransaction = await StockTransaction.findById(transaction._id)
-      .populate("item", "name unit");
+      .populate({
+        path: "item",
+        populate: { path: "category" }
+      });
 
     res.status(201).json(populatedTransaction);
   } catch (error) {
@@ -72,7 +78,10 @@ exports.getItemTransactions = async (req, res) => {
     const transactions = await StockTransaction.find({ 
       item: req.params.itemId,
       school: req.user.schoolId
-    }).populate("item", "name unit");
+    }).populate({
+      path: "item",
+      populate: { path: "category" }
+    });
     res.json(transactions);
   } catch (error) {
     console.error("Get item transactions error:", error);
@@ -131,7 +140,10 @@ exports.updateTransaction = async (req, res) => {
       req.params.id,
       updateData,
       { new: true }
-    ).populate("item", "name unit");
+    ).populate({
+      path: "item",
+      populate: { path: "category" }
+    });
     
     res.json(updatedTransaction);
   } catch (error) {
@@ -245,7 +257,10 @@ exports.getBorrowedItems = async (req, res) => {
       type: "BORROW",
       status: "BORROWED",
       school: req.user.schoolId
-    }).populate("item", "name unit location currentQuantity");
+    }).populate({
+      path: "item",
+      populate: { path: "category" }
+    });
     
     console.log(`Found ${borrowed.length} borrowed items`);
     
