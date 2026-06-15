@@ -16,13 +16,15 @@ const {
     requestSchoolCodeRecovery,
     verifySecurityAnswer,
     requestPasswordReset,
-    verifyAndResetPassword
+    verifyAndResetPassword,
+    checkSuperAdminExists  // Add this import
 } = require("../controllers/authController");
 
 // Public routes
 router.post("/login", login);
 router.post("/admin-login", adminLogin);
 router.post("/setup-superadmin", setupSuperAdmin);
+router.get("/check-superadmin", checkSuperAdminExists);  // Add this route
 
 // Password reset (with security questions)
 router.post("/forgot-password", forgotPassword);

@@ -1,14 +1,19 @@
 const express = require("express");
 const router = express.Router();
-const auth = require("../middleware/authMiddleware");
+const authMiddleware = require("../middleware/authMiddleware");
+const { authorize } = require("../middleware/authMiddleware");
 const stockController = require("../controllers/stockController");
 
-router.get("/borrowed", auth, stockController.getBorrowedItems);
-router.get("/", auth, stockController.getTransactions);
-router.post("/", auth, stockController.createTransaction);
-router.get("/item/:itemId", auth, stockController.getItemTransactions);
-router.put("/:id/return", auth, stockController.returnBorrowedItem);
-router.put("/:id", auth, stockController.updateTransaction);
-router.delete("/:id", auth, stockController.deleteTransaction);
+// Apply auth middleware to all routes
+router.use(authMiddleware);
+
+// Stock routes - Only stock keepers and admins can access
+router.get("/borrowed", authorize("superadmin", "school_admin", "stock_keeper", "bursar"), stockController.getBorrowedItems);
+router.get("/", authorize("superadmin", "school_admin", "stock_keeper", "bursar"), stockController.getTransactions);
+router.post("/", authorize("superadmin", "school_admin", "stock_keeper"), stockController.createTransaction);
+router.get("/item/:itemId", authorize("superadmin", "school_admin", "stock_keeper", "bursar"), stockController.getItemTransactions);
+router.put("/:id/return", authorize("superadmin", "school_admin", "stock_keeper"), stockController.returnBorrowedItem);
+router.put("/:id", authorize("superadmin", "school_admin", "stock_keeper"), stockController.updateTransaction);
+router.delete("/:id", authorize("superadmin", "school_admin", "stock_keeper"), stockController.deleteTransaction);
 
 module.exports = router;
