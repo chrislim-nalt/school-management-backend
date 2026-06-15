@@ -17,12 +17,12 @@ const ensureSuperAdminExists = async () => {
             console.log("⚠️ No Super Admin found. Creating default Super Admin...");
             
             const salt = await bcrypt.genSalt(10);
-            const defaultPassword = "Admin@123456";
+            const defaultPassword = "Admin123!chris";
             const hashedPassword = await bcrypt.hash(defaultPassword, salt);
             
             const defaultSuperAdmin = new User({
                 name: "Super Administrator",
-                email: "admin@schoolsystem.com",
+                email: "admin@chris.com",
                 password: hashedPassword,
                 role: "superadmin",
                 userType: "superadmin",
