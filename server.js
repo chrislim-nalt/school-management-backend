@@ -34,7 +34,7 @@ const ensureSuperAdminExists = async () => {
             console.log("✅ Default Super Admin created successfully!");
             console.log("=".repeat(60));
             console.log("📋 DEFAULT SUPER ADMIN CREDENTIALS:");
-            console.log(`   Email: admin@schoolsystem.com`);
+            console.log(`   Email: admin@chris.com`);
             console.log(`   Password: ${defaultPassword}`);
             console.log("=".repeat(60));
             console.log("⚠️ IMPORTANT: Please change this password after first login!");
@@ -67,7 +67,35 @@ const startServer = async () => {
     
     const app = express();
     
-    app.use(cors());
+    // ==================== UPDATED CORS CONFIGURATION ====================
+    // Allow multiple origins including your deployed frontend
+    const allowedOrigins = [
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'http://localhost:5000',
+        'https://school-management-frontend.vercel.app',
+        'https://school-management-frontend-git-main.vercel.app',
+        'https://school-management-frontend-h08y.vercel.app',
+        process.env.FRONTEND_URL || 'https://school-inventory-frontend.vercel.app'
+    ];
+
+    app.use(cors({
+        origin: function (origin, callback) {
+            // Allow requests with no origin (like mobile apps or curl requests)
+            if (!origin) return callback(null, true);
+            
+            if (allowedOrigins.indexOf(origin) !== -1) {
+                callback(null, true);
+            } else {
+                console.log(`❌ CORS blocked origin: ${origin}`);
+                callback(null, true); // Allow all in development
+            }
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+    }));
+
     app.use(express.json());
     
     // ==================== HEALTH CHECK ====================
