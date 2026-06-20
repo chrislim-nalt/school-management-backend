@@ -10,21 +10,16 @@ const markSchema = new mongoose.Schema({
   totalScore: { type: Number, min: 0, max: 100, default: 0 },
   grade: { type: String, enum: ["A", "B", "C", "D", "F"], default: "F" },
   remarks: { type: String, default: "" },
-  recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Teacher" },
+  recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   school: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true }
 }, { timestamps: true });
 
-// Pre-save middleware is fine for marks (no ID generation needed)
-markSchema.pre('save', function(next) {
-  this.totalScore = (this.continuousAssessment || 0) + (this.examScore || 0);
-  
-  if (this.totalScore >= 80) this.grade = "A";
-  else if (this.totalScore >= 70) this.grade = "B";
-  else if (this.totalScore >= 60) this.grade = "C";
-  else if (this.totalScore >= 50) this.grade = "D";
-  else this.grade = "F";
-  
-  next();
-});
+// NO PRE-SAVE HOOK - Calculate in the controller instead
+// This avoids the "next is not a function" error
+
+// Indexes
+markSchema.index({ student: 1, course: 1, term: 1, year: 1 });
+markSchema.index({ school: 1, term: 1, year: 1 });
+markSchema.index({ grade: 1 });
 
 module.exports = mongoose.model("Mark", markSchema);

@@ -10,7 +10,7 @@ exports.requestPermission = async (req, res) => {
 
     const { reason, startDate, endDate } = req.body;
 
-    // Validate inputs first before any DB call
+    // Validate inputs
     if (!reason || !startDate || !endDate) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
@@ -31,12 +31,27 @@ exports.requestPermission = async (req, res) => {
       return res.status(400).json({ success: false, message: "Permission cannot exceed 7 days" });
     }
 
-    // Find teacher by email (email is confirmed present in req.user from authMiddleware)
-    const teacher = await Teacher.findOne({
+    // Find teacher by email
+    let teacher = await Teacher.findOne({
       email: req.user.email,
       school: req.user.schoolId
     });
-    console.log("Found teacher:", teacher ? teacher.name : "NOT FOUND");
+
+    // If teacher not found, check if user has teacher role
+    if (!teacher && req.user.userType === "teacher") {
+      // Create teacher record if it doesn't exist
+      const TeacherModel = require("../models/Teacher");
+      const teacherId = await TeacherModel.generateTeacherId(req.user.schoolId);
+      teacher = new TeacherModel({
+        teacherId: teacherId,
+        name: req.user.name,
+        email: req.user.email,
+        school: req.user.schoolId,
+        status: "ACTIVE"
+      });
+      await teacher.save();
+      console.log("Created teacher record for:", req.user.email);
+    }
 
     if (!teacher) {
       return res.status(404).json({
@@ -57,8 +72,8 @@ exports.requestPermission = async (req, res) => {
 
     const permission = new Permission({
       teacher: teacher._id,
-      teacherName: teacher.name,
-      teacherEmail: teacher.email,
+      teacherName: teacher.name || req.user.name,
+      teacherEmail: teacher.email || req.user.email,
       reason,
       startDate: start,
       endDate: end,
@@ -85,14 +100,27 @@ exports.getMyPermissions = async (req, res) => {
     console.log("=== GET MY PERMISSIONS ===");
     console.log("User:", req.user.email, req.user.userType);
 
-    const teacher = await Teacher.findOne({
+    // Find teacher by email or use user id
+    let teacher = await Teacher.findOne({
       email: req.user.email,
       school: req.user.schoolId
     });
 
+    // If teacher not found, try to find by user id
     if (!teacher) {
-      // Return empty list — teacher record may not exist yet, not a hard error
-      return res.json({ success: true, permissions: [] });
+      teacher = await Teacher.findOne({
+        _id: req.user.id,
+        school: req.user.schoolId
+      });
+    }
+
+    if (!teacher) {
+      // Return empty list with success - teacher may not have requested any permissions yet
+      return res.json({ 
+        success: true, 
+        permissions: [],
+        message: "No permissions found. You can create a new permission request."
+      });
     }
 
     const permissions = await Permission.find({
@@ -104,17 +132,18 @@ exports.getMyPermissions = async (req, res) => {
     res.json({ success: true, permissions });
   } catch (error) {
     console.error("Get my permissions error:", error);
-    res.json({ success: true, permissions: [] });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // Get all permissions (School Admin)
 exports.getAllPermissions = async (req, res) => {
   try {
-    const { status, startDate, endDate } = req.query;
+    const { status, startDate, endDate, teacherId } = req.query;
     let filter = { school: req.user.schoolId };
 
     if (status) filter.status = status;
+    if (teacherId) filter.teacher = teacherId;
     if (startDate && endDate) {
       filter.createdAt = { $gte: new Date(startDate), $lte: new Date(endDate) };
     }
@@ -124,6 +153,7 @@ exports.getAllPermissions = async (req, res) => {
       .populate("approvedBy", "name email")
       .sort({ createdAt: -1 });
 
+    // Calculate summary
     const summary = {
       total: permissions.length,
       pending: permissions.filter(p => p.status === "PENDING").length,
@@ -247,8 +277,7 @@ exports.getPermissionReport = async (req, res) => {
       .populate("teacher", "name email teacherId")
       .sort({ createdAt: -1 });
 
-    // Build byTeacher — initialise ALL possible status keys to avoid
-    // "Cannot set properties of undefined" when status is DISAPPROVED or REVOKED
+    // Build byTeacher
     const byTeacher = {};
     permissions.forEach(p => {
       const name = p.teacherName || "Unknown";
@@ -270,7 +299,7 @@ exports.getPermissionReport = async (req, res) => {
       byTeacher[name].totalDays += p.totalDays || 0;
     });
 
-    // Build byMonth — same fix: initialise all status keys
+    // Build byMonth
     const byMonth = {};
     permissions.forEach(p => {
       const month = p.createdAt.toISOString().substring(0, 7);
@@ -290,8 +319,21 @@ exports.getPermissionReport = async (req, res) => {
       }
     });
 
-    // Guard totalDays with || 0 to prevent NaN in reduce
     const totalDaysRequested = permissions.reduce((sum, p) => sum + (p.totalDays || 0), 0);
+
+    // Format data for charts
+    const chartData = {
+      statusDistribution: [
+        { label: "Approved", value: permissions.filter(p => p.status === "APPROVED").length },
+        { label: "Pending", value: permissions.filter(p => p.status === "PENDING").length },
+        { label: "Disapproved", value: permissions.filter(p => p.status === "DISAPPROVED").length },
+        { label: "Revoked", value: permissions.filter(p => p.status === "REVOKED").length }
+      ],
+      monthlyTrend: Object.entries(byMonth).map(([month, data]) => ({
+        month,
+        ...data
+      })).sort((a, b) => a.month.localeCompare(b.month))
+    };
 
     res.json({
       success: true,
@@ -308,6 +350,7 @@ exports.getPermissionReport = async (req, res) => {
       },
       byTeacher,
       byMonth,
+      chartData,
       permissions
     });
   } catch (error) {

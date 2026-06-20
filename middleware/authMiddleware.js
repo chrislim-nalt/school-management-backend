@@ -2,7 +2,6 @@ const jwt = require("jsonwebtoken");
 
 // Main authentication middleware
 const authMiddleware = (req, res, next) => {
-    // Get token from header
     let token = req.header("Authorization")?.replace("Bearer ", "");
     
     if (!token && req.header("Authorization")) {
@@ -21,21 +20,19 @@ const authMiddleware = (req, res, next) => {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
-        // Populate user object with all necessary fields
         req.user = {
             id: decoded.id,
             email: decoded.email,
             name: decoded.name,
-            role: decoded.role,
-            userType: decoded.userType || decoded.role,
+            role: decoded.role || "staff",
+            userType: decoded.userType || decoded.role || "staff",
             schoolId: decoded.schoolId || null,
             schoolCode: decoded.schoolCode || null,
             schoolName: decoded.schoolName || null
         };
         
-        if (process.env.NODE_ENV === 'development') {
-            console.log(`✅ Auth: ${req.user.email} (${req.user.role}/${req.user.userType})`);
-        }
+        // Log for debugging
+        console.log(`✅ Auth: ${req.user.email} (${req.user.userType}) - School: ${req.user.schoolId}`);
         
         next();
     } catch (error) {
@@ -72,7 +69,14 @@ const authorize = (...allowedRoles) => {
         }
         
         // Check if user's role or userType is in allowed roles
-        const hasAccess = allowedRoles.includes(req.user.role) || allowedRoles.includes(req.user.userType);
+        const userRole = req.user.role || "";
+        const userType = req.user.userType || "";
+        
+        const hasAccess = allowedRoles.some(role => 
+            userRole === role || 
+            userType === role ||
+            (role === "school_admin" && userType === "admin") // Handle legacy naming
+        );
         
         if (!hasAccess) {
             console.warn(`❌ Access denied: ${req.user.email} (${req.user.userType}) attempted to access ${req.originalUrl}`);
@@ -111,20 +115,148 @@ const requireSchoolAccess = (req, res, next) => {
         });
     }
     
-    // Check if requested schoolId matches user's school
-    const requestedSchoolId = req.params.schoolId || req.body.schoolId;
-    if (requestedSchoolId && requestedSchoolId !== req.user.schoolId.toString()) {
-        return res.status(403).json({ 
-            success: false,
-            message: "Forbidden: You can only access resources for your own school" 
-        });
-    }
-    
+    // Always attach schoolId to req for filtering
+    req.schoolId = req.user.schoolId;
     next();
 };
 
-// Export all middleware
+// Teacher-specific middleware
+const isTeacher = (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ 
+            success: false,
+            message: "Unauthorized: No user context found" 
+        });
+    }
+    
+    if (req.user.role === "superadmin") {
+        return next();
+    }
+    
+    if (req.user.userType === "teacher" || req.user.userType === "staff") {
+        return next();
+    }
+    
+    return res.status(403).json({ 
+        success: false,
+        message: "Forbidden: This resource is only accessible by teachers" 
+    });
+};
+
+// School admin middleware
+const isSchoolAdmin = (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ 
+            success: false,
+            message: "Unauthorized: No user context found" 
+        });
+    }
+    
+    if (req.user.role === "superadmin") {
+        return next();
+    }
+    
+    if (req.user.userType === "school_admin" || req.user.userType === "admin") {
+        return next();
+    }
+    
+    return res.status(403).json({ 
+        success: false,
+        message: "Forbidden: This resource is only accessible by school administrators" 
+    });
+};
+
+// Bursar middleware
+const isBursar = (req, res, next) => {
+    if (!req.user) {
+        return res.status(401).json({ 
+            success: false,
+            message: "Unauthorized: No user context found" 
+        });
+    }
+    
+    if (req.user.role === "superadmin") {
+        return next();
+    }
+    
+    if (req.user.userType === "bursar" || req.user.userType === "school_admin" || req.user.userType === "admin") {
+        return next();
+    }
+    
+    return res.status(403).json({ 
+        success: false,
+        message: "Forbidden: This resource is only accessible by bursar or administrator" 
+    });
+};
+
+// Permission check for teacher actions
+const checkTeacherPermissions = (permission) => {
+    return async (req, res, next) => {
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({ 
+                success: false,
+                message: "Unauthorized: No user context found" 
+            });
+        }
+        
+        // Super admin has all permissions
+        if (req.user.role === "superadmin") {
+            return next();
+        }
+        
+        // School admin has all permissions
+        if (req.user.userType === "school_admin" || req.user.userType === "admin") {
+            return next();
+        }
+        
+        // For teachers, we need to check permissions from Teacher model
+        try {
+            const Teacher = require("../models/Teacher");
+            const teacher = await Teacher.findOne({ 
+                email: req.user.email,
+                school: req.user.schoolId
+            });
+            
+            if (!teacher) {
+                return res.status(403).json({ 
+                    success: false,
+                    message: "Teacher record not found" 
+                });
+            }
+            
+            // Check specific permission
+            const permissionMap = {
+                "canAddMarks": teacher.permissions?.canAddMarks,
+                "canManageAttendance": teacher.permissions?.canManageAttendance,
+                "canViewReports": teacher.permissions?.canViewReports
+            };
+            
+            const hasPermission = permissionMap[permission];
+            
+            if (hasPermission === false) {
+                return res.status(403).json({ 
+                    success: false,
+                    message: `Forbidden: You don't have permission to ${permission.replace('can', '').toLowerCase()}`,
+                    missingPermission: permission
+                });
+            }
+            
+            next();
+        } catch (error) {
+            console.error("checkTeacherPermissions error:", error);
+            res.status(500).json({ 
+                success: false,
+                message: "Internal server error while checking permissions" 
+            });
+        }
+    };
+};
+
 module.exports = authMiddleware;
 module.exports.protect = authMiddleware;
 module.exports.authorize = authorize;
 module.exports.requireSchoolAccess = requireSchoolAccess;
+module.exports.isTeacher = isTeacher;
+module.exports.isSchoolAdmin = isSchoolAdmin;
+module.exports.isBursar = isBursar;
+module.exports.checkTeacherPermissions = checkTeacherPermissions;

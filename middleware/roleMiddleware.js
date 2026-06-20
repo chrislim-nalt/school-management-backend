@@ -76,17 +76,26 @@ const requireSchoolAccess = (req, res, next) => {
         });
     }
     
-    // Check if the requested schoolId matches user's school
-    const requestedSchoolId = req.params.schoolId || req.body.schoolId;
+    // Log the school access for debugging
+    console.log(`School access: User ${req.user.email} (${req.user.userType}) accessing school ${req.user.schoolId}`);
     
-    if (requestedSchoolId && requestedSchoolId !== req.user.schoolId.toString()) {
-        console.warn(`User ${req.user.email} attempted to access school ${requestedSchoolId} but belongs to ${req.user.schoolId}`);
-        return res.status(403).json({ 
-            success: false,
-            message: "Forbidden: You can only access resources for your own school" 
-        });
+    // Only check if the requested schoolId matches user's school if it's provided
+    // The schoolId can come from params, body, or query
+    let requestedSchoolId = req.params.schoolId || req.body.schoolId || req.query.schoolId;
+    
+    // If a schoolId is explicitly requested, verify it matches the user's school
+    if (requestedSchoolId) {
+        if (requestedSchoolId !== req.user.schoolId.toString()) {
+            console.warn(`User ${req.user.email} attempted to access school ${requestedSchoolId} but belongs to ${req.user.schoolId}`);
+            return res.status(403).json({ 
+                success: false,
+                message: "Forbidden: You can only access resources for your own school" 
+            });
+        }
     }
     
+    // If no schoolId is explicitly requested, we still allow access because the user's 
+    // schoolId from the token will be used in the controllers for filtering
     next();
 };
 
