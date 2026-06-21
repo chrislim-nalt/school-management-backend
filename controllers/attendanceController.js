@@ -1,14 +1,19 @@
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const Teacher = require("../models/Teacher");
-const mongoose = require("mongoose");
 
 // ==================== STUDENT ATTENDANCE ====================
 
-// Get students by class for attendance
+// Get students by class for attendance - FIXED
 exports.getStudentsByClassForAttendance = async (req, res) => {
   try {
     const { grade, className } = req.query;
+    
+    console.log("=== getStudentsByClassForAttendance ===");
+    console.log("Grade:", grade);
+    console.log("Class:", className);
+    console.log("School ID:", req.user.schoolId);
+    console.log("User:", req.user.email, req.user.userType);
     
     if (!grade || !className) {
       return res.status(400).json({
@@ -26,30 +31,17 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
       });
     }
     
-    // If user is a teacher, check if they are assigned to this class
-    if (req.user.userType === "teacher" || req.user.userType === "staff") {
-      const teacher = await Teacher.findOne({ 
-        email: req.user.email, 
-        school: schoolId 
-      });
-      
-      // If teacher is found and has subjects, verify they can access this class
-      if (teacher) {
-        // Teachers can access any class (they might have multiple classes)
-        // You can add additional logic here to filter by assigned subjects
-        console.log(`Teacher ${teacher.name} accessing class ${grade} ${className}`);
-      }
-    }
-    
+    // Direct query to find students - no teacher filtering
     const students = await Student.find({
-      grade,
-      className,
+      grade: grade,
+      className: className,
       school: schoolId,
       status: "ACTIVE",
       isDeleted: false
-    }).select("name studentId grade className");
+    }).select("name studentId grade className gender parentPhone status");
     
-    console.log(`Found ${students.length} students in class ${grade} ${className}`);
+    console.log(`Found ${students.length} students in ${grade} ${className}`);
+    console.log("Students:", students.map(s => ({ name: s.name, id: s.studentId })));
     
     res.json({
       success: true,
@@ -61,7 +53,8 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
-      students: []
+      students: [],
+      count: 0
     });
   }
 };
@@ -71,6 +64,13 @@ exports.markStudentAttendance = async (req, res) => {
   try {
     const { grade, className, date, period, records } = req.body;
     const schoolId = req.user.schoolId;
+    
+    console.log("=== markStudentAttendance ===");
+    console.log("Grade:", grade);
+    console.log("Class:", className);
+    console.log("Date:", date);
+    console.log("Period:", period);
+    console.log("Records count:", records?.length);
     
     if (!grade || !className || !date || !records) {
       return res.status(400).json({
@@ -110,7 +110,6 @@ exports.markStudentAttendance = async (req, res) => {
         });
         
         if (existingAttendance) {
-          // Update existing
           existingAttendance.status = record.status || "PRESENT";
           existingAttendance.reason = record.reason || "";
           existingAttendance.recordedBy = req.user.id;
@@ -118,7 +117,6 @@ exports.markStudentAttendance = async (req, res) => {
           await existingAttendance.save();
           results.push(existingAttendance);
         } else {
-          // Create new
           const attendance = new Attendance({
             userId: record.studentId,
             userName: student.name,
@@ -230,7 +228,6 @@ exports.getStudentAttendanceReport = async (req, res) => {
       .populate("recordedBy", "name")
       .sort({ date: 1 });
     
-    // Calculate summary
     const totalDays = new Set(attendance.map(a => a.date.toISOString().split('T')[0])).size;
     const totalPresent = attendance.filter(a => a.status === "PRESENT").length;
     const totalAbsent = attendance.filter(a => a.status === "ABSENT").length;
@@ -239,7 +236,6 @@ exports.getStudentAttendanceReport = async (req, res) => {
     
     const overallAttendance = totalRecords > 0 ? ((totalPresent / totalRecords) * 100).toFixed(1) : 0;
     
-    // Daily breakdown
     const dailyBreakdown = {};
     attendance.forEach(a => {
       const dateKey = a.date.toISOString().split('T')[0];
@@ -465,7 +461,6 @@ exports.getTeacherAttendanceReport = async (req, res) => {
       .populate("recordedBy", "name")
       .sort({ date: 1 });
     
-    // Calculate summary
     const totalDays = new Set(attendance.map(a => a.date.toISOString().split('T')[0])).size;
     const totalPresent = attendance.filter(a => a.status === "PRESENT").length;
     const totalAbsent = attendance.filter(a => a.status === "ABSENT").length;
@@ -474,7 +469,6 @@ exports.getTeacherAttendanceReport = async (req, res) => {
     
     const overallAttendance = totalRecords > 0 ? ((totalPresent / totalRecords) * 100).toFixed(1) : 0;
     
-    // Daily breakdown
     const dailyBreakdown = {};
     attendance.forEach(a => {
       const dateKey = a.date.toISOString().split('T')[0];

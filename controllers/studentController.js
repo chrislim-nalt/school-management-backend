@@ -2,21 +2,39 @@ const Student = require("../models/Student");
 const Mark = require("../models/Mark");
 const Attendance = require("../models/Attendance");
 
+// ==================== GET STUDENTS ====================
+
 // Get all students
 exports.getStudents = async (req, res) => {
   try {
-    const { grade, className, status } = req.query;
+    const { grade, className, status, search } = req.query;
     let filter = { school: req.user.schoolId, isDeleted: false };
     
     if (grade) filter.grade = grade;
     if (className) filter.className = className;
     if (status) filter.status = status;
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { studentId: { $regex: search, $options: 'i' } },
+        { parentPhone: { $regex: search, $options: 'i' } }
+      ];
+    }
     
     const students = await Student.find(filter).sort({ name: 1 });
-    res.json(students);
+    res.json({
+      success: true,
+      students: students || [],
+      count: (students || []).length
+    });
   } catch (error) {
     console.error("Get students error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      students: [],
+      count: 0
+    });
   }
 };
 
@@ -28,11 +46,76 @@ exports.getStudentById = async (req, res) => {
       school: req.user.schoolId,
       isDeleted: false
     });
-    if (!student) return res.status(404).json({ message: "Student not found" });
-    res.json(student);
+    if (!student) return res.status(404).json({ success: false, message: "Student not found" });
+    res.json({ success: true, student });
   } catch (error) {
     console.error("Get student error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get students by class - FIXED for attendance
+exports.getStudentsByClass = async (req, res) => {
+  try {
+    const { grade, className } = req.query;
+    
+    console.log("=== getStudentsByClass ===");
+    console.log("Grade:", grade);
+    console.log("Class:", className);
+    console.log("School ID:", req.user.schoolId);
+    console.log("User:", req.user.email, req.user.userType);
+    
+    if (!grade || !className) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Grade and class name are required" 
+      });
+    }
+    
+    const schoolId = req.user.schoolId;
+    
+    if (!schoolId) {
+      return res.status(400).json({
+        success: false,
+        message: "School ID not found for this user"
+      });
+    }
+    
+    // If user is a teacher, check if they are assigned to this class
+    if (req.user.userType === "teacher" || req.user.userType === "staff") {
+      const Teacher = require("../models/Teacher");
+      const teacher = await Teacher.findOne({ 
+        email: req.user.email, 
+        school: schoolId 
+      });
+      console.log("Teacher found:", teacher ? teacher.name : "Not found");
+      // Teachers can access any class for attendance
+    }
+    
+    const students = await Student.find({
+      grade,
+      className,
+      school: schoolId,
+      status: "ACTIVE",
+      isDeleted: false
+    }).select("name studentId grade className gender parentPhone status");
+    
+    console.log(`Found ${students.length} students in ${grade} ${className}`);
+    console.log("Students:", students.map(s => ({ name: s.name, id: s.studentId })));
+    
+    res.json({
+      success: true,
+      students: students || [],
+      count: (students || []).length
+    });
+  } catch (error) {
+    console.error("Get students by class error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      students: [],
+      count: 0
+    });
   }
 };
 
@@ -41,24 +124,21 @@ exports.createStudent = async (req, res) => {
   try {
     console.log("Creating student with data:", JSON.stringify(req.body, null, 2));
     
-    // Validate required fields
     if (!req.body.name) {
-      return res.status(400).json({ message: "Student name is required" });
+      return res.status(400).json({ success: false, message: "Student name is required" });
     }
     if (!req.body.grade) {
-      return res.status(400).json({ message: "Grade is required" });
+      return res.status(400).json({ success: false, message: "Grade is required" });
     }
     if (!req.body.className) {
-      return res.status(400).json({ message: "Class name is required" });
+      return res.status(400).json({ success: false, message: "Class name is required" });
     }
     
-    // Generate student ID
     const studentId = await Student.generateStudentId(req.user.schoolId);
     console.log("Generated student ID:", studentId);
     
-    // Create student with school ID from authenticated user
     const studentData = {
-      studentId: studentId, // Set the generated ID
+      studentId: studentId,
       name: req.body.name.trim(),
       grade: req.body.grade,
       className: req.body.className,
@@ -99,12 +179,13 @@ exports.createStudent = async (req, res) => {
     if (error.name === 'ValidationError') {
       const validationErrors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({ 
+        success: false,
         message: "Validation failed", 
         errors: validationErrors,
         details: error.message
       });
     }
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
@@ -113,7 +194,7 @@ exports.updateStudent = async (req, res) => {
   try {
     const updateData = { ...req.body };
     delete updateData._id;
-    delete updateData.studentId; // Don't allow updating student ID
+    delete updateData.studentId;
     delete updateData.school;
     delete updateData.createdAt;
     delete updateData.updatedAt;
@@ -123,7 +204,7 @@ exports.updateStudent = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     );
-    if (!student) return res.status(404).json({ message: "Student not found" });
+    if (!student) return res.status(404).json({ success: false, message: "Student not found" });
     res.json({
       success: true,
       message: "Student updated successfully",
@@ -131,7 +212,7 @@ exports.updateStudent = async (req, res) => {
     });
   } catch (error) {
     console.error("Update student error:", error);
-    res.status(400).json({ message: error.message });
+    res.status(400).json({ success: false, message: error.message });
   }
 };
 
@@ -143,14 +224,14 @@ exports.deleteStudent = async (req, res) => {
       { isDeleted: true, deletedAt: new Date(), deletedBy: req.user.id },
       { new: true }
     );
-    if (!student) return res.status(404).json({ message: "Student not found" });
+    if (!student) return res.status(404).json({ success: false, message: "Student not found" });
     res.json({ 
       success: true,
       message: "Student deleted successfully" 
     });
   } catch (error) {
     console.error("Delete student error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -179,6 +260,7 @@ exports.getStudentPerformance = async (req, res) => {
     };
     
     res.json({
+      success: true,
       studentId,
       marks,
       average,
@@ -188,7 +270,7 @@ exports.getStudentPerformance = async (req, res) => {
     });
   } catch (error) {
     console.error("Get student performance error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -220,6 +302,7 @@ exports.getStudentAttendance = async (req, res) => {
     const late = attendance.filter(a => a.status === "LATE").length;
     
     res.json({
+      success: true,
       total,
       present,
       absent,
@@ -229,6 +312,6 @@ exports.getStudentAttendance = async (req, res) => {
     });
   } catch (error) {
     console.error("Get student attendance error:", error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
