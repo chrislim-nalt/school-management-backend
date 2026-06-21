@@ -76,19 +76,32 @@ const startServer = async () => {
         'https://school-management-frontend.vercel.app',
         'https://school-management-frontend-git-main.vercel.app',
         'https://school-management-frontend-h08y.vercel.app',
-        process.env.FRONTEND_URL || 'https://school-inventory-frontend.vercel.app'
-    ];
+        'https://school-inventory-frontend.vercel.app',
+        process.env.FRONTEND_URL
+    ].filter(Boolean);
 
+    // Enable CORS with options
     app.use(cors({
         origin: function (origin, callback) {
             // Allow requests with no origin (like mobile apps or curl requests)
-            if (!origin) return callback(null, true);
+            if (!origin) {
+                console.log("✅ No origin - allowing");
+                return callback(null, true);
+            }
             
-            if (allowedOrigins.indexOf(origin) !== -1) {
+            // Check if origin is allowed
+            if (allowedOrigins.some(allowed => origin.includes(allowed) || allowed === '*')) {
+                console.log(`✅ CORS allowed: ${origin}`);
                 callback(null, true);
             } else {
-                console.log(`❌ CORS blocked origin: ${origin}`);
-                callback(null, true); // Allow all in development
+                // In development, allow all
+                if (process.env.NODE_ENV !== 'production') {
+                    console.log(`⚠️ CORS allowing all in dev: ${origin}`);
+                    callback(null, true);
+                } else {
+                    console.log(`❌ CORS blocked: ${origin}`);
+                    callback(new Error('Not allowed by CORS'), false);
+                }
             }
         },
         credentials: true,
@@ -132,204 +145,45 @@ const startServer = async () => {
     });
     
     // ==================== EXISTING API ROUTES ====================
-    try {
-        app.use("/api/stock", require("./routes/stockRoutes"));
-        console.log("✅ Stock routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load stock routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/categories", require("./routes/categoryRoutes"));
-        console.log("✅ Category routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load category routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/items", require("./routes/itemRoutes"));
-        console.log("✅ Item routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load item routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/auth", require("./routes/auth"));
-        console.log("✅ Auth routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load auth routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/feeding", require("./routes/feedingRoutes"));
-        console.log("✅ Feeding routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load feeding routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/stock-periods", require("./routes/stockPeriodRoutes"));
-        console.log("✅ Stock period routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load stock period routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/stock-records", require("./routes/stockRecordRoutes"));
-        console.log("✅ Stock record routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load stock record routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/tracked-assets", require("./routes/trackedAssetRoutes"));
-        console.log("✅ Tracked asset routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load tracked asset routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/projected-needs", require("./routes/projectedNeedRoutes"));
-        console.log("✅ Projected needs routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load projected needs routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/assets", require("./routes/assetRoutes"));
-        console.log("✅ Asset routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load asset routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/cleaning-supplies", require("./routes/cleaningSupplyRoutes"));
-        console.log("✅ Cleaning supplies routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load cleaning supplies routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/laboratory", require("./routes/laboratoryRoutes"));
-        console.log("✅ Laboratory routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load laboratory routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/library", require("./routes/libraryRoutes"));
-        console.log("✅ Library routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load library routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/admin", require("./routes/adminRoutes"));
-        console.log("✅ Admin routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load admin routes:", error.message);
-    }
-    
-    // ==================== SCHOOL MANAGEMENT API ROUTES ====================
-    try {
-        app.use("/api/teachers", require("./routes/teacherRoutes"));
-        console.log("✅ Teacher routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load teacher routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/students", require("./routes/studentRoutes"));
-        console.log("✅ Student routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load student routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/courses", require("./routes/courseRoutes"));
-        console.log("✅ Course routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load course routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/marks", require("./routes/markRoutes"));
-        console.log("✅ Mark routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load mark routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/attendance", require("./routes/attendanceRoutes"));
-        console.log("✅ Attendance routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load attendance routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/transport", require("./routes/transportRoutes"));
-        console.log("✅ Transport routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load transport routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/reports", require("./routes/reportRoutes"));
-        console.log("✅ Report routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load report routes:", error.message);
-    }
-    
-    // ==================== NEW SCHOOL OPERATIONS ROUTES ====================
-    try {
-        app.use("/api/permissions", require("./routes/permissionRoutes"));
-        console.log("✅ Permission routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load permission routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/discipline", require("./routes/disciplineRoutes"));
-        console.log("✅ Discipline routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load discipline routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/english-performance", require("./routes/englishPerformanceRoutes"));
-        console.log("✅ English performance routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load english performance routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/homework", require("./routes/homeworkRoutes"));
-        console.log("✅ Homework routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load homework routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/slow-learners", require("./routes/slowLearnerRoutes"));
-        console.log("✅ Slow learner routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load slow learner routes:", error.message);
-    }
-    
-    // ==================== VISITOR ROUTES ====================
-    try {
-        app.use("/api/visitors", require("./routes/visitorRoutes"));
-        console.log("✅ Visitor routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load visitor routes:", error.message);
-    }
-    
-    try {
-        app.use("/api/activities", require("./routes/activityRoutes"));
-        console.log("✅ Activity routes loaded");
-    } catch (error) {
-        console.error("❌ Failed to load activity routes:", error.message);
-    }
+    const routeFiles = {
+        stock: "./routes/stockRoutes",
+        categories: "./routes/categoryRoutes",
+        items: "./routes/itemRoutes",
+        auth: "./routes/auth",
+        feeding: "./routes/feedingRoutes",
+        "stock-periods": "./routes/stockPeriodRoutes",
+        "stock-records": "./routes/stockRecordRoutes",
+        "tracked-assets": "./routes/trackedAssetRoutes",
+        "projected-needs": "./routes/projectedNeedRoutes",
+        assets: "./routes/assetRoutes",
+        "cleaning-supplies": "./routes/cleaningSupplyRoutes",
+        laboratory: "./routes/laboratoryRoutes",
+        library: "./routes/libraryRoutes",
+        admin: "./routes/adminRoutes",
+        teachers: "./routes/teacherRoutes",
+        students: "./routes/studentRoutes",
+        courses: "./routes/courseRoutes",
+        marks: "./routes/markRoutes",
+        attendance: "./routes/attendanceRoutes",
+        transport: "./routes/transportRoutes",
+        reports: "./routes/reportRoutes",
+        permissions: "./routes/permissionRoutes",
+        discipline: "./routes/disciplineRoutes",
+        "english-performance": "./routes/englishPerformanceRoutes",
+        homework: "./routes/homeworkRoutes",
+        "slow-learners": "./routes/slowLearnerRoutes",
+        visitors: "./routes/visitorRoutes",
+        activities: "./routes/activityRoutes"
+    };
+
+    Object.entries(routeFiles).forEach(([name, path]) => {
+        try {
+            app.use(`/api/${name}`, require(path));
+            console.log(`✅ ${name.charAt(0).toUpperCase() + name.slice(1)} routes loaded`);
+        } catch (error) {
+            console.error(`❌ Failed to load ${name} routes:`, error.message);
+        }
+    });
     
     // ==================== 404 HANDLER ====================
     app.use((req, res) => {
@@ -343,7 +197,7 @@ const startServer = async () => {
     
     // ==================== ERROR HANDLER ====================
     app.use((err, req, res, next) => {
-        console.error("Error:", err.message);
+        console.error("❌ Error:", err.message);
         console.error("Stack:", err.stack);
         res.status(500).json({ 
             message: "Internal server error",
