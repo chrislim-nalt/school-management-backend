@@ -99,7 +99,7 @@ exports.getStudentsByClass = async (req, res) => {
   }
 };
 
-// Create student - Generate ID in controller
+// Create student - Generate ID in controller with retry logic
 exports.createStudent = async (req, res) => {
   try {
     console.log("=== CREATE STUDENT ===");
@@ -125,7 +125,7 @@ exports.createStudent = async (req, res) => {
       });
     }
     
-    // Check for duplicate student
+    // Check for duplicate student by name
     const existingStudent = await Student.findOne({
       name: req.body.name.trim(),
       grade: req.body.grade,
@@ -141,13 +141,13 @@ exports.createStudent = async (req, res) => {
       });
     }
     
-    // GENERATE STUDENT ID IN CONTROLLER (not in model)
-    const studentId = await Student.generateStudentId(req.user.schoolId);
+    // GENERATE STUDENT ID WITH RETRY LOGIC
+    const studentId = await Student.getNextStudentId(req.user.schoolId);
     console.log("Generated student ID:", studentId);
     
     // Create student data WITH the generated studentId
     const studentData = {
-      studentId: studentId, // Set the generated ID
+      studentId: studentId,
       name: req.body.name.trim(),
       grade: req.body.grade,
       className: req.body.className,
@@ -195,10 +195,61 @@ exports.createStudent = async (req, res) => {
     
     // Handle duplicate key error
     if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: "A student with this ID already exists. Please try again."
-      });
+      // If duplicate key error, try one more time with a new ID
+      try {
+        console.log("Duplicate key error, retrying with new ID...");
+        // Regenerate ID with explicit retry
+        const newStudentId = await Student.getNextStudentId(req.user.schoolId, 5);
+        
+        // Update the studentData with new ID
+        const retryData = { ...req.body };
+        retryData.studentId = newStudentId;
+        retryData.name = req.body.name.trim();
+        retryData.grade = req.body.grade;
+        retryData.className = req.body.className;
+        retryData.school = req.user.schoolId;
+        retryData.dateOfBirth = req.body.dateOfBirth || null;
+        retryData.gender = req.body.gender || "MALE";
+        retryData.address = req.body.address || "";
+        retryData.parentName = req.body.parentName || "";
+        retryData.parentPhone = req.body.parentPhone || "";
+        retryData.parentEmail = req.body.parentEmail || "";
+        retryData.parentOccupation = req.body.parentOccupation || "";
+        retryData.parentAddress = req.body.parentAddress || "";
+        retryData.emergencyContact = req.body.emergencyContact || "";
+        retryData.emergencyContactPhone = req.body.emergencyContactPhone || "";
+        retryData.emergencyRelationship = req.body.emergencyRelationship || "";
+        retryData.medicalInfo = req.body.medicalInfo || "";
+        retryData.allergies = req.body.allergies || "";
+        retryData.bloodGroup = req.body.bloodGroup || "";
+        retryData.previousSchool = req.body.previousSchool || "";
+        retryData.transportSubscribed = req.body.transportSubscribed || false;
+        retryData.transportRoute = req.body.transportRoute || "";
+        retryData.transportPickupPoint = req.body.transportPickupPoint || "";
+        retryData.transportDropoffPoint = req.body.transportDropoffPoint || "";
+        retryData.status = req.body.status || "ACTIVE";
+        
+        const retryStudent = new Student(retryData);
+        const savedStudent = await retryStudent.save();
+        
+        console.log("Student created successfully on retry:", {
+          id: savedStudent._id,
+          studentId: savedStudent.studentId,
+          name: savedStudent.name
+        });
+        
+        return res.status(201).json({
+          success: true,
+          message: "Student created successfully",
+          student: savedStudent
+        });
+      } catch (retryError) {
+        console.error("Retry create student error:", retryError);
+        return res.status(400).json({
+          success: false,
+          message: "Failed to create student after multiple attempts. Please try again."
+        });
+      }
     }
     
     // Handle validation errors

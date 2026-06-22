@@ -52,27 +52,102 @@ const studentSchema = new mongoose.Schema({
 studentSchema.statics.generateStudentId = async function(schoolId) {
   try {
     const Student = this;
-    const lastStudent = await Student.findOne({ 
-      school: schoolId,
-      isDeleted: false
-    }).sort({ studentId: -1 }).limit(1);
     
-    let lastId = 0;
-    if (lastStudent && lastStudent.studentId) {
-      const match = lastStudent.studentId.match(/\d+/);
-      if (match) {
-        lastId = parseInt(match[0]);
+    // Get all students for this school and extract numeric IDs
+    const students = await Student.find({ 
+      school: schoolId,
+      isDeleted: false,
+      studentId: { $regex: /^STD-\d+$/ } // Only match valid student IDs
+    }).select('studentId');
+    
+    let maxId = 0;
+    for (const student of students) {
+      if (student.studentId) {
+        const match = student.studentId.match(/\d+/);
+        if (match) {
+          const num = parseInt(match[0]);
+          if (num > maxId) {
+            maxId = num;
+          }
+        }
       }
     }
     
-    const newId = lastId + 1;
+    const newId = maxId + 1;
     const paddedId = String(newId).padStart(4, '0');
     return `STD-${paddedId}`;
   } catch (error) {
     console.error("Error generating student ID:", error);
+    // Fallback to timestamp-based ID
     const timestamp = Date.now().toString().slice(-8);
     return `STD-${timestamp}`;
   }
+};
+
+// Static method to get next student ID with retry on conflict
+studentSchema.statics.getNextStudentId = async function(schoolId, maxRetries = 3) {
+  let attempts = 0;
+  while (attempts < maxRetries) {
+    try {
+      // Generate a candidate ID
+      const candidateId = await this.generateStudentId(schoolId);
+      
+      // Check if it already exists
+      const existing = await this.findOne({ 
+        school: schoolId, 
+        studentId: candidateId,
+        isDeleted: false 
+      });
+      
+      if (!existing) {
+        return candidateId; // ID is unique, return it
+      }
+      
+      // If duplicate, force increment by finding max numeric ID
+      attempts++;
+      console.log(`ID ${candidateId} already exists, retry ${attempts}`);
+      
+      // Force find max numeric ID by scanning all student IDs
+      const allStudents = await this.find({ 
+        school: schoolId,
+        isDeleted: false 
+      }).select('studentId');
+      
+      let maxId = 0;
+      for (const student of allStudents) {
+        if (student.studentId) {
+          const match = student.studentId.match(/\d+/);
+          if (match) {
+            const num = parseInt(match[0]);
+            if (num > maxId) maxId = num;
+          }
+        }
+      }
+      
+      // Try with the forced max + 1
+      const forcedId = maxId + 1;
+      const paddedForcedId = String(forcedId).padStart(4, '0');
+      const forcedCandidate = `STD-${paddedForcedId}`;
+      
+      // Check if this one exists
+      const existingForced = await this.findOne({ 
+        school: schoolId, 
+        studentId: forcedCandidate,
+        isDeleted: false 
+      });
+      
+      if (!existingForced) {
+        return forcedCandidate;
+      }
+    } catch (error) {
+      console.error("Error in getNextStudentId:", error);
+      attempts++;
+    }
+  }
+  
+  // Last resort: use timestamp
+  const timestamp = Date.now().toString().slice(-8);
+  return `STD-${timestamp}`;
 };
 
 // Indexes
