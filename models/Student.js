@@ -53,20 +53,21 @@ studentSchema.statics.generateStudentId = async function(schoolId) {
   try {
     const Student = this;
     
-    // Get all students for this school and extract numeric IDs
+    // Get all students for this school with studentId that starts with "STD-"
     const students = await Student.find({ 
       school: schoolId,
       isDeleted: false,
-      studentId: { $regex: /^STD-\d+$/ } // Only match valid student IDs
+      studentId: { $regex: /^STD-/ } // Match any studentId starting with STD-
     }).select('studentId');
     
     let maxId = 0;
     for (const student of students) {
       if (student.studentId) {
-        const match = student.studentId.match(/\d+/);
-        if (match) {
-          const num = parseInt(match[0]);
-          if (num > maxId) {
+        // Extract numbers from studentId (handles STD-0001, STD-1, STD-1234, etc.)
+        const match = student.studentId.match(/STD-(\d+)/);
+        if (match && match[1]) {
+          const num = parseInt(match[1]);
+          if (!isNaN(num) && num > maxId) {
             maxId = num;
           }
         }
@@ -85,69 +86,79 @@ studentSchema.statics.generateStudentId = async function(schoolId) {
 };
 
 // Static method to get next student ID with retry on conflict
-studentSchema.statics.getNextStudentId = async function(schoolId, maxRetries = 3) {
+studentSchema.statics.getNextStudentId = async function(schoolId, maxRetries = 5) {
   let attempts = 0;
+  
   while (attempts < maxRetries) {
     try {
       // Generate a candidate ID
       const candidateId = await this.generateStudentId(schoolId);
+      console.log(`[Attempt ${attempts + 1}] Generated candidate ID: ${candidateId}`);
       
-      // Check if it already exists
+      // Check if it already exists (including deleted students to avoid conflicts)
       const existing = await this.findOne({ 
         school: schoolId, 
-        studentId: candidateId,
-        isDeleted: false 
+        studentId: candidateId
       });
       
       if (!existing) {
+        console.log(`[Attempt ${attempts + 1}] ID ${candidateId} is available`);
         return candidateId; // ID is unique, return it
       }
       
-      // If duplicate, force increment by finding max numeric ID
-      attempts++;
-      console.log(`ID ${candidateId} already exists, retry ${attempts}`);
+      console.log(`[Attempt ${attempts + 1}] ID ${candidateId} already exists, retrying...`);
       
-      // Force find max numeric ID by scanning all student IDs
+      // Force find max numeric ID by scanning ALL student IDs (including deleted)
       const allStudents = await this.find({ 
-        school: schoolId,
-        isDeleted: false 
+        school: schoolId
       }).select('studentId');
       
       let maxId = 0;
       for (const student of allStudents) {
         if (student.studentId) {
-          const match = student.studentId.match(/\d+/);
-          if (match) {
-            const num = parseInt(match[0]);
-            if (num > maxId) maxId = num;
+          const match = student.studentId.match(/STD-(\d+)/);
+          if (match && match[1]) {
+            const num = parseInt(match[1]);
+            if (!isNaN(num) && num > maxId) {
+              maxId = num;
+            }
           }
         }
       }
+      
+      console.log(`[Attempt ${attempts + 1}] Found max ID: ${maxId}`);
       
       // Try with the forced max + 1
       const forcedId = maxId + 1;
       const paddedForcedId = String(forcedId).padStart(4, '0');
       const forcedCandidate = `STD-${paddedForcedId}`;
       
+      console.log(`[Attempt ${attempts + 1}] Trying forced ID: ${forcedCandidate}`);
+      
       // Check if this one exists
       const existingForced = await this.findOne({ 
         school: schoolId, 
-        studentId: forcedCandidate,
-        isDeleted: false 
+        studentId: forcedCandidate
       });
       
       if (!existingForced) {
+        console.log(`[Attempt ${attempts + 1}] Forced ID ${forcedCandidate} is available`);
         return forcedCandidate;
       }
+      
+      attempts++;
     } catch (error) {
       console.error("Error in getNextStudentId:", error);
       attempts++;
     }
   }
   
-  // Last resort: use timestamp
+  // Last resort: use timestamp with high precision
   const timestamp = Date.now().toString().slice(-8);
-  return `STD-${timestamp}`;
+  const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  const finalId = `STD-${timestamp}${randomSuffix}`;
+  console.log(`All retries failed, using timestamp-based ID: ${finalId}`);
+  return finalId;
 };
 
 // Indexes

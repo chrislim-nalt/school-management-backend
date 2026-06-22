@@ -143,7 +143,7 @@ exports.createStudent = async (req, res) => {
     
     // GENERATE STUDENT ID WITH RETRY LOGIC
     const studentId = await Student.getNextStudentId(req.user.schoolId);
-    console.log("Generated student ID:", studentId);
+    console.log("Final student ID to use:", studentId);
     
     // Create student data WITH the generated studentId
     const studentData = {
@@ -198,8 +198,30 @@ exports.createStudent = async (req, res) => {
       // If duplicate key error, try one more time with a new ID
       try {
         console.log("Duplicate key error, retrying with new ID...");
-        // Regenerate ID with explicit retry
-        const newStudentId = await Student.getNextStudentId(req.user.schoolId, 5);
+        
+        // Get the max ID directly from the database
+        const allStudents = await Student.find({ 
+          school: req.user.schoolId
+        }).select('studentId');
+        
+        let maxId = 0;
+        for (const student of allStudents) {
+          if (student.studentId) {
+            const match = student.studentId.match(/STD-(\d+)/);
+            if (match && match[1]) {
+              const num = parseInt(match[1]);
+              if (!isNaN(num) && num > maxId) {
+                maxId = num;
+              }
+            }
+          }
+        }
+        
+        const newId = maxId + 1;
+        const paddedId = String(newId).padStart(4, '0');
+        const newStudentId = `STD-${paddedId}`;
+        
+        console.log(`Retry with new ID: ${newStudentId} (max was ${maxId})`);
         
         // Update the studentData with new ID
         const retryData = { ...req.body };
@@ -245,10 +267,62 @@ exports.createStudent = async (req, res) => {
         });
       } catch (retryError) {
         console.error("Retry create student error:", retryError);
-        return res.status(400).json({
-          success: false,
-          message: "Failed to create student after multiple attempts. Please try again."
-        });
+        
+        // One more attempt with timestamp-based ID
+        try {
+          console.log("Final attempt with timestamp-based ID...");
+          const timestamp = Date.now().toString().slice(-8);
+          const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+          const finalId = `STD-${timestamp}${randomSuffix}`;
+          
+          const finalData = { ...req.body };
+          finalData.studentId = finalId;
+          finalData.name = req.body.name.trim();
+          finalData.grade = req.body.grade;
+          finalData.className = req.body.className;
+          finalData.school = req.user.schoolId;
+          finalData.dateOfBirth = req.body.dateOfBirth || null;
+          finalData.gender = req.body.gender || "MALE";
+          finalData.address = req.body.address || "";
+          finalData.parentName = req.body.parentName || "";
+          finalData.parentPhone = req.body.parentPhone || "";
+          finalData.parentEmail = req.body.parentEmail || "";
+          finalData.parentOccupation = req.body.parentOccupation || "";
+          finalData.parentAddress = req.body.parentAddress || "";
+          finalData.emergencyContact = req.body.emergencyContact || "";
+          finalData.emergencyContactPhone = req.body.emergencyContactPhone || "";
+          finalData.emergencyRelationship = req.body.emergencyRelationship || "";
+          finalData.medicalInfo = req.body.medicalInfo || "";
+          finalData.allergies = req.body.allergies || "";
+          finalData.bloodGroup = req.body.bloodGroup || "";
+          finalData.previousSchool = req.body.previousSchool || "";
+          finalData.transportSubscribed = req.body.transportSubscribed || false;
+          finalData.transportRoute = req.body.transportRoute || "";
+          finalData.transportPickupPoint = req.body.transportPickupPoint || "";
+          finalData.transportDropoffPoint = req.body.transportDropoffPoint || "";
+          finalData.status = req.body.status || "ACTIVE";
+          
+          const finalStudent = new Student(finalData);
+          const savedStudent = await finalStudent.save();
+          
+          console.log("Student created successfully with timestamp ID:", {
+            id: savedStudent._id,
+            studentId: savedStudent.studentId,
+            name: savedStudent.name
+          });
+          
+          return res.status(201).json({
+            success: true,
+            message: "Student created successfully",
+            student: savedStudent
+          });
+        } catch (finalError) {
+          console.error("Final attempt failed:", finalError);
+          return res.status(400).json({
+            success: false,
+            message: "Failed to create student after multiple attempts. Please try again."
+          });
+        }
       }
     }
     
