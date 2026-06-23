@@ -56,7 +56,7 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
   }
 };
 
-// Mark student attendance
+// Mark student attendance - FIXED with proper date handling
 exports.markStudentAttendance = async (req, res) => {
   try {
     const { grade, className, date, period, records } = req.body;
@@ -76,11 +76,18 @@ exports.markStudentAttendance = async (req, res) => {
       });
     }
     
+    // Create a proper date object for the attendance date
+    const attendanceDate = new Date(date);
+    attendanceDate.setHours(0, 0, 0, 0);
+    
+    console.log("Attendance date:", attendanceDate);
+    
     const results = [];
     const errors = [];
     
     for (const record of records) {
       try {
+        // Find student by ID
         const student = await Student.findOne({ 
           _id: record.studentId,
           school: schoolId
@@ -94,42 +101,52 @@ exports.markStudentAttendance = async (req, res) => {
           continue;
         }
         
+        // Check for existing attendance record for this student on this date
         const existingAttendance = await Attendance.findOne({
           userId: record.studentId,
           userType: "STUDENT",
-          date: new Date(date),
+          date: attendanceDate,
           period: period || "DAILY",
-          grade,
-          className,
           school: schoolId
         });
         
+        const status = record.status || "PRESENT";
+        const reason = record.reason || "";
+        
+        let savedRecord;
         if (existingAttendance) {
-          existingAttendance.status = record.status || "PRESENT";
-          existingAttendance.reason = record.reason || "";
+          // Update existing record
+          console.log(`Updating attendance for student ${student.name} (${student.studentId})`);
+          existingAttendance.status = status;
+          existingAttendance.reason = reason;
+          existingAttendance.grade = grade;
+          existingAttendance.className = className;
           existingAttendance.recordedBy = req.user.id;
           existingAttendance.recordedByName = req.user.name;
           await existingAttendance.save();
-          results.push(existingAttendance);
+          savedRecord = existingAttendance;
         } else {
-          const attendance = new Attendance({
+          // Create new record
+          console.log(`Creating new attendance for student ${student.name} (${student.studentId})`);
+          const newAttendance = new Attendance({
             userId: record.studentId,
             userName: student.name,
             userType: "STUDENT",
             userIdentifier: student.studentId,
-            grade: student.grade,
-            className: student.className,
-            status: record.status || "PRESENT",
-            reason: record.reason || "",
-            date: new Date(date),
+            grade: grade,
+            className: className,
+            status: status,
+            reason: reason,
+            date: attendanceDate,
             period: period || "DAILY",
             recordedBy: req.user.id,
             recordedByName: req.user.name || req.user.email || "Unknown",
             school: schoolId
           });
-          await attendance.save();
-          results.push(attendance);
+          await newAttendance.save();
+          savedRecord = newAttendance;
         }
+        results.push(savedRecord);
       } catch (error) {
         console.error(`Error processing attendance for student ${record.studentId}:`, error);
         errors.push({
@@ -138,6 +155,8 @@ exports.markStudentAttendance = async (req, res) => {
         });
       }
     }
+    
+    console.log(`Successfully saved ${results.length} attendance records`);
     
     res.status(201).json({
       success: true,
@@ -154,11 +173,14 @@ exports.markStudentAttendance = async (req, res) => {
   }
 };
 
-// Get student attendance by class
+// Get student attendance by class - FIXED date handling
 exports.getStudentAttendanceByClass = async (req, res) => {
   try {
     const { grade, className, date, period } = req.query;
     const schoolId = req.user.schoolId;
+    
+    console.log("=== getStudentAttendanceByClass ===");
+    console.log("Params:", { grade, className, date, period });
     
     if (!grade || !className || !date) {
       return res.status(400).json({
@@ -167,17 +189,24 @@ exports.getStudentAttendanceByClass = async (req, res) => {
       });
     }
     
+    // Create proper date range
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    
+    console.log("Date range:", { startDate, endDate });
+    
     const attendance = await Attendance.find({
-      grade,
-      className,
+      grade: grade,
+      className: className,
       userType: "STUDENT",
-      date: {
-        $gte: new Date(date + "T00:00:00.000Z"),
-        $lt: new Date(date + "T23:59:59.999Z")
-      },
+      date: { $gte: startDate, $lte: endDate },
       period: period || "DAILY",
       school: schoolId
     }).populate("recordedBy", "name");
+    
+    console.log(`Found ${attendance.length} attendance records`);
     
     res.json({
       success: true,
@@ -201,7 +230,6 @@ exports.getStudentAttendanceReport = async (req, res) => {
     
     console.log("=== getStudentAttendanceReport ===");
     console.log("Params:", { grade, className, startDate, endDate, period });
-    console.log("School ID:", schoolId);
     
     if (!startDate || !endDate) {
       return res.status(400).json({
@@ -210,12 +238,15 @@ exports.getStudentAttendanceReport = async (req, res) => {
       });
     }
     
+    // Create proper date range
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    
     let filter = {
       userType: "STUDENT",
-      date: {
-        $gte: new Date(startDate + "T00:00:00.000Z"),
-        $lte: new Date(endDate + "T23:59:59.999Z")
-      },
+      date: { $gte: start, $lte: end },
       school: schoolId
     };
     
@@ -227,7 +258,7 @@ exports.getStudentAttendanceReport = async (req, res) => {
       .populate("recordedBy", "name")
       .sort({ date: 1 });
     
-    console.log(`Found ${attendance.length} attendance records`);
+    console.log(`Found ${attendance.length} attendance records for report`);
     
     // Calculate summary
     const totalDays = new Set(attendance.map(a => a.date.toISOString().split('T')[0])).size;
@@ -260,8 +291,8 @@ exports.getStudentAttendanceReport = async (req, res) => {
         totalPresent,
         totalAbsent,
         totalLate,
-        averageAttendance: overallAttendance,
-        overallAttendance: overallAttendance
+        averageAttendance: parseFloat(overallAttendance),
+        overallAttendance: parseFloat(overallAttendance)
       },
       dailyBreakdown,
       records: attendance
@@ -309,11 +340,16 @@ exports.getTeachersForAttendance = async (req, res) => {
   }
 };
 
-// Mark teacher attendance
+// Mark teacher attendance - FIXED with proper date handling
 exports.markTeacherAttendance = async (req, res) => {
   try {
     const { date, period, records } = req.body;
     const schoolId = req.user.schoolId;
+    
+    console.log("=== markTeacherAttendance ===");
+    console.log("Date:", date);
+    console.log("Period:", period);
+    console.log("Records count:", records?.length);
     
     if (!date || !records) {
       return res.status(400).json({
@@ -321,6 +357,9 @@ exports.markTeacherAttendance = async (req, res) => {
         message: "Date and records are required"
       });
     }
+    
+    const attendanceDate = new Date(date);
+    attendanceDate.setHours(0, 0, 0, 0);
     
     const results = [];
     const errors = [];
@@ -343,39 +382,48 @@ exports.markTeacherAttendance = async (req, res) => {
         const existingAttendance = await Attendance.findOne({
           userId: record.teacherId,
           userType: "TEACHER",
-          date: new Date(date),
+          date: attendanceDate,
           period: period || "DAILY",
           school: schoolId
         });
         
+        const status = record.status || "PRESENT";
+        const reason = record.reason || "";
+        const checkInTime = record.checkInTime || "";
+        const checkOutTime = record.checkOutTime || "";
+        
+        let savedRecord;
         if (existingAttendance) {
-          existingAttendance.status = record.status || "PRESENT";
-          existingAttendance.reason = record.reason || "";
-          existingAttendance.checkInTime = record.checkInTime || "";
-          existingAttendance.checkOutTime = record.checkOutTime || "";
+          console.log(`Updating teacher attendance for ${teacher.name}`);
+          existingAttendance.status = status;
+          existingAttendance.reason = reason;
+          existingAttendance.checkInTime = checkInTime;
+          existingAttendance.checkOutTime = checkOutTime;
           existingAttendance.recordedBy = req.user.id;
           existingAttendance.recordedByName = req.user.name;
           await existingAttendance.save();
-          results.push(existingAttendance);
+          savedRecord = existingAttendance;
         } else {
-          const attendance = new Attendance({
+          console.log(`Creating new teacher attendance for ${teacher.name}`);
+          const newAttendance = new Attendance({
             userId: record.teacherId,
             userName: teacher.name,
             userType: "TEACHER",
             userIdentifier: teacher.teacherId,
-            status: record.status || "PRESENT",
-            reason: record.reason || "",
-            checkInTime: record.checkInTime || "",
-            checkOutTime: record.checkOutTime || "",
-            date: new Date(date),
+            status: status,
+            reason: reason,
+            checkInTime: checkInTime,
+            checkOutTime: checkOutTime,
+            date: attendanceDate,
             period: period || "DAILY",
             recordedBy: req.user.id,
             recordedByName: req.user.name || req.user.email || "Unknown",
             school: schoolId
           });
-          await attendance.save();
-          results.push(attendance);
+          await newAttendance.save();
+          savedRecord = newAttendance;
         }
+        results.push(savedRecord);
       } catch (error) {
         console.error(`Error processing teacher attendance:`, error);
         errors.push({
@@ -384,6 +432,8 @@ exports.markTeacherAttendance = async (req, res) => {
         });
       }
     }
+    
+    console.log(`Successfully saved ${results.length} teacher attendance records`);
     
     res.status(201).json({
       success: true,
@@ -400,7 +450,7 @@ exports.markTeacherAttendance = async (req, res) => {
   }
 };
 
-// Get teacher attendance by date
+// Get teacher attendance by date - FIXED date handling
 exports.getTeacherAttendanceByDate = async (req, res) => {
   try {
     const { date, period } = req.query;
@@ -413,12 +463,14 @@ exports.getTeacherAttendanceByDate = async (req, res) => {
       });
     }
     
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    
     const attendance = await Attendance.find({
       userType: "TEACHER",
-      date: {
-        $gte: new Date(date + "T00:00:00.000Z"),
-        $lt: new Date(date + "T23:59:59.999Z")
-      },
+      date: { $gte: startDate, $lte: endDate },
       period: period || "DAILY",
       school: schoolId
     }).populate("recordedBy", "name");
@@ -450,12 +502,14 @@ exports.getTeacherAttendanceReport = async (req, res) => {
       });
     }
     
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    end.setHours(23, 59, 59, 999);
+    
     let filter = {
       userType: "TEACHER",
-      date: {
-        $gte: new Date(startDate + "T00:00:00.000Z"),
-        $lte: new Date(endDate + "T23:59:59.999Z")
-      },
+      date: { $gte: start, $lte: end },
       school: schoolId
     };
     
@@ -494,8 +548,8 @@ exports.getTeacherAttendanceReport = async (req, res) => {
         totalPresent,
         totalAbsent,
         totalLate,
-        averageAttendance: overallAttendance,
-        overallAttendance: overallAttendance
+        averageAttendance: parseFloat(overallAttendance),
+        overallAttendance: parseFloat(overallAttendance)
       },
       dailyBreakdown,
       records: attendance
