@@ -4,7 +4,7 @@ const Teacher = require("../models/Teacher");
 
 // ==================== STUDENT ATTENDANCE ====================
 
-// Get students by class for attendance - FIXED
+// Get students by class for attendance
 exports.getStudentsByClassForAttendance = async (req, res) => {
   try {
     const { grade, className } = req.query;
@@ -13,7 +13,6 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
     console.log("Grade:", grade);
     console.log("Class:", className);
     console.log("School ID:", req.user.schoolId);
-    console.log("User:", req.user.email, req.user.userType);
     
     if (!grade || !className) {
       return res.status(400).json({
@@ -31,7 +30,6 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
       });
     }
     
-    // Direct query to find students - no teacher filtering
     const students = await Student.find({
       grade: grade,
       className: className,
@@ -41,7 +39,6 @@ exports.getStudentsByClassForAttendance = async (req, res) => {
     }).select("name studentId grade className gender parentPhone status");
     
     console.log(`Found ${students.length} students in ${grade} ${className}`);
-    console.log("Students:", students.map(s => ({ name: s.name, id: s.studentId })));
     
     res.json({
       success: true,
@@ -84,7 +81,6 @@ exports.markStudentAttendance = async (req, res) => {
     
     for (const record of records) {
       try {
-        // Find student by ID
         const student = await Student.findOne({ 
           _id: record.studentId,
           school: schoolId
@@ -98,7 +94,6 @@ exports.markStudentAttendance = async (req, res) => {
           continue;
         }
         
-        // Find existing attendance
         const existingAttendance = await Attendance.findOne({
           userId: record.studentId,
           userType: "STUDENT",
@@ -198,11 +193,15 @@ exports.getStudentAttendanceByClass = async (req, res) => {
   }
 };
 
-// Get student attendance report
+// Get student attendance report - FIXED for dashboard
 exports.getStudentAttendanceReport = async (req, res) => {
   try {
     const { grade, className, startDate, endDate, period } = req.query;
     const schoolId = req.user.schoolId;
+    
+    console.log("=== getStudentAttendanceReport ===");
+    console.log("Params:", { grade, className, startDate, endDate, period });
+    console.log("School ID:", schoolId);
     
     if (!startDate || !endDate) {
       return res.status(400).json({
@@ -228,6 +227,9 @@ exports.getStudentAttendanceReport = async (req, res) => {
       .populate("recordedBy", "name")
       .sort({ date: 1 });
     
+    console.log(`Found ${attendance.length} attendance records`);
+    
+    // Calculate summary
     const totalDays = new Set(attendance.map(a => a.date.toISOString().split('T')[0])).size;
     const totalPresent = attendance.filter(a => a.status === "PRESENT").length;
     const totalAbsent = attendance.filter(a => a.status === "ABSENT").length;
@@ -236,6 +238,7 @@ exports.getStudentAttendanceReport = async (req, res) => {
     
     const overallAttendance = totalRecords > 0 ? ((totalPresent / totalRecords) * 100).toFixed(1) : 0;
     
+    // Daily breakdown
     const dailyBreakdown = {};
     attendance.forEach(a => {
       const dateKey = a.date.toISOString().split('T')[0];
@@ -257,7 +260,8 @@ exports.getStudentAttendanceReport = async (req, res) => {
         totalPresent,
         totalAbsent,
         totalLate,
-        overallAttendance
+        averageAttendance: overallAttendance,
+        overallAttendance: overallAttendance
       },
       dailyBreakdown,
       records: attendance
@@ -490,7 +494,8 @@ exports.getTeacherAttendanceReport = async (req, res) => {
         totalPresent,
         totalAbsent,
         totalLate,
-        overallAttendance
+        averageAttendance: overallAttendance,
+        overallAttendance: overallAttendance
       },
       dailyBreakdown,
       records: attendance
