@@ -1,6 +1,15 @@
 const Permission = require("../models/Permission");
 const Teacher = require("../models/Teacher");
 
+// Helper function to calculate total days
+const calculateTotalDays = (startDate, endDate) => {
+  if (!startDate || !endDate) return 0;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const diffTime = Math.abs(end - start);
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+};
+
 // Request permission (Teacher only)
 exports.requestPermission = async (req, res) => {
   try {
@@ -26,8 +35,10 @@ exports.requestPermission = async (req, res) => {
       return res.status(400).json({ success: false, message: "Start date must be before end date" });
     }
 
-    const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24)) + 1;
-    if (diffDays > 7) {
+    // Calculate total days in controller
+    const totalDays = calculateTotalDays(start, end);
+    
+    if (totalDays > 7) {
       return res.status(400).json({ success: false, message: "Permission cannot exceed 7 days" });
     }
 
@@ -37,9 +48,8 @@ exports.requestPermission = async (req, res) => {
       school: req.user.schoolId
     });
 
-    // If teacher not found, check if user has teacher role
+    // If teacher not found, create one
     if (!teacher && req.user.userType === "teacher") {
-      // Create teacher record if it doesn't exist
       const TeacherModel = require("../models/Teacher");
       const teacherId = await TeacherModel.generateTeacherId(req.user.schoolId);
       teacher = new TeacherModel({
@@ -70,6 +80,7 @@ exports.requestPermission = async (req, res) => {
       return res.status(400).json({ success: false, message: "You already have a pending permission request" });
     }
 
+    // Create permission with totalDays calculated in controller
     const permission = new Permission({
       teacher: teacher._id,
       teacherName: teacher.name || req.user.name,
@@ -77,6 +88,7 @@ exports.requestPermission = async (req, res) => {
       reason,
       startDate: start,
       endDate: end,
+      totalDays: totalDays, // Set in controller
       school: req.user.schoolId
     });
 
@@ -100,13 +112,11 @@ exports.getMyPermissions = async (req, res) => {
     console.log("=== GET MY PERMISSIONS ===");
     console.log("User:", req.user.email, req.user.userType);
 
-    // Find teacher by email or use user id
     let teacher = await Teacher.findOne({
       email: req.user.email,
       school: req.user.schoolId
     });
 
-    // If teacher not found, try to find by user id
     if (!teacher) {
       teacher = await Teacher.findOne({
         _id: req.user.id,
@@ -115,7 +125,6 @@ exports.getMyPermissions = async (req, res) => {
     }
 
     if (!teacher) {
-      // Return empty list with success - teacher may not have requested any permissions yet
       return res.json({ 
         success: true, 
         permissions: [],
@@ -153,7 +162,6 @@ exports.getAllPermissions = async (req, res) => {
       .populate("approvedBy", "name email")
       .sort({ createdAt: -1 });
 
-    // Calculate summary
     const summary = {
       total: permissions.length,
       pending: permissions.filter(p => p.status === "PENDING").length,
@@ -277,7 +285,6 @@ exports.getPermissionReport = async (req, res) => {
       .populate("teacher", "name email teacherId")
       .sort({ createdAt: -1 });
 
-    // Build byTeacher
     const byTeacher = {};
     permissions.forEach(p => {
       const name = p.teacherName || "Unknown";
@@ -299,7 +306,6 @@ exports.getPermissionReport = async (req, res) => {
       byTeacher[name].totalDays += p.totalDays || 0;
     });
 
-    // Build byMonth
     const byMonth = {};
     permissions.forEach(p => {
       const month = p.createdAt.toISOString().substring(0, 7);
@@ -321,7 +327,6 @@ exports.getPermissionReport = async (req, res) => {
 
     const totalDaysRequested = permissions.reduce((sum, p) => sum + (p.totalDays || 0), 0);
 
-    // Format data for charts
     const chartData = {
       statusDistribution: [
         { label: "Approved", value: permissions.filter(p => p.status === "APPROVED").length },

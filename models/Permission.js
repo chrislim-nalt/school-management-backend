@@ -20,25 +20,12 @@ const permissionSchema = new mongoose.Schema({
   school: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true }
 }, { timestamps: true });
 
-// Auto-calculate total days before save
-permissionSchema.pre('save', function(next) {
-  if (this.startDate && this.endDate) {
-    const diffTime = Math.abs(this.endDate - this.startDate);
-    this.totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  }
-  next();
-});
+// NO PRE-SAVE HOOKS - Calculate in controller instead
+// This avoids the "next is not a function" error
 
-// Ensure permission doesn't exceed 7 days
-permissionSchema.pre('validate', function(next) {
-  if (this.startDate && this.endDate) {
-    const diffTime = Math.abs(this.endDate - this.startDate);
-    const days = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    if (days > 7) {
-      next(new Error("Permission cannot exceed 7 days"));
-    }
-  }
-  next();
-});
+// Indexes
+permissionSchema.index({ teacher: 1, status: 1 });
+permissionSchema.index({ school: 1, createdAt: -1 });
+permissionSchema.index({ startDate: 1, endDate: 1 });
 
 module.exports = mongoose.model("Permission", permissionSchema);
