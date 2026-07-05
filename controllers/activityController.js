@@ -1,6 +1,7 @@
 const Activity = require("../models/Activity");
 const Student = require("../models/Student");
 const Course = require("../models/Course");
+const SlowLearner = require("../models/SlowLearner");
 const { v4: uuidv4 } = require("uuid");
 
 // Helper function to calculate percentage
@@ -68,7 +69,7 @@ exports.assignActivityToClass = async (req, res) => {
     // Create activity records for each student
     const activities = [];
     const errors = [];
-    const studentActivityMap = {}; // Map studentId to activity _id
+    const studentActivityMap = {};
     
     for (const student of students) {
       try {
@@ -88,6 +89,14 @@ exports.assignActivityToClass = async (req, res) => {
         
         const percentage = calculatePercentage(score, parsedMaxScore);
         
+        // Determine performance level
+        let performanceLevel = "AVERAGE";
+        if (percentage >= 90) performanceLevel = "EXCELLENT";
+        else if (percentage >= 75) performanceLevel = "GOOD";
+        else if (percentage >= 50) performanceLevel = "AVERAGE";
+        else if (percentage >= 30) performanceLevel = "POOR";
+        else performanceLevel = "FAILING";
+        
         const activityData = {
           grade,
           className,
@@ -102,6 +111,9 @@ exports.assignActivityToClass = async (req, res) => {
           studentId: student.studentId,
           score: score,
           percentage: percentage,
+          marksObtained: score,
+          marksTotal: parsedMaxScore,
+          performanceLevel: performanceLevel,
           date: activityDate,
           term,
           academicYear: academicYear,
@@ -109,13 +121,20 @@ exports.assignActivityToClass = async (req, res) => {
           recordedBy: req.user.id,
           recordedByName: req.user.name || req.user.email || "Unknown",
           school: req.user.schoolId,
-          batchId: batchId
+          batchId: batchId,
+          isSlowLearnerActivity: false,
+          slowLearnerCaseId: null
         };
         
         const activity = new Activity(activityData);
         await activity.save();
         activities.push(activity);
         studentActivityMap[student._id.toString()] = activity._id.toString();
+        
+        // ===== AUTOMATIC SLOW LEARNER UPDATE =====
+        // Check if student is a slow learner and update their progress
+        await exports.updateSlowLearnerProgress(student._id, activity, req.user.schoolId);
+        
       } catch (error) {
         console.error(`Error creating activity for student ${student.name}:`, error);
         errors.push({
@@ -140,7 +159,7 @@ exports.assignActivityToClass = async (req, res) => {
       successful: activities.length,
       errors: errors.length > 0 ? errors : undefined,
       activities: populatedActivities,
-      studentActivityMap: studentActivityMap // Return mapping for frontend
+      studentActivityMap: studentActivityMap
     });
   } catch (error) {
     console.error("Assign activity to class error:", error);
@@ -196,7 +215,7 @@ exports.getClassActivities = async (req, res) => {
             date: a.date,
             term: a.term,
             students: [],
-            activityIds: {} // Map studentId to activity _id
+            activityIds: {}
           };
         }
         groupedByBatch[a.batchId].students.push({
@@ -204,7 +223,10 @@ exports.getClassActivities = async (req, res) => {
           studentName: a.studentName,
           score: a.score,
           percentage: a.percentage,
-          activityId: a._id // Add the actual activity _id
+          marksObtained: a.marksObtained,
+          marksTotal: a.marksTotal,
+          performanceLevel: a.performanceLevel,
+          activityId: a._id
         });
         groupedByBatch[a.batchId].activityIds[a.studentId] = a._id;
       }
@@ -248,7 +270,7 @@ exports.getClassActivities = async (req, res) => {
   }
 };
 
-// ==================== UPDATE STUDENT SCORE - FIXED ====================
+// ==================== UPDATE STUDENT SCORE ====================
 
 exports.updateStudentScore = async (req, res) => {
   try {
@@ -266,7 +288,7 @@ exports.updateStudentScore = async (req, res) => {
       });
     }
     
-    // Find the student by their MongoDB _id or display ID
+    // Find the student
     let student;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(studentId);
     
@@ -285,21 +307,17 @@ exports.updateStudentScore = async (req, res) => {
     
     console.log("Found student:", student.name, "with _id:", student._id);
     
-    // Find the activity - the activityId could be either:
-    // 1. A MongoDB ObjectId (24 hex chars) - the actual activity _id
-    // 2. A UUID (batchId) - then we need to find the specific activity for this student
+    // Find the activity
     let activity;
     const isActivityObjectId = /^[0-9a-fA-F]{24}$/.test(activityId);
     
     if (isActivityObjectId) {
-      // It's a MongoDB ObjectId, find directly
       activity = await Activity.findOne({
         _id: activityId,
         student: student._id,
         school: req.user.schoolId
       });
     } else {
-      // It's a UUID (batchId), find the activity for this student in this batch
       activity = await Activity.findOne({
         batchId: activityId,
         student: student._id,
@@ -324,11 +342,26 @@ exports.updateStudentScore = async (req, res) => {
       });
     }
     
+    // Update activity
     activity.score = parsedScore;
     activity.percentage = calculatePercentage(parsedScore, activity.maxScore);
+    activity.marksObtained = parsedScore;
+    activity.marksTotal = activity.maxScore;
+    
+    // Update performance level
+    const percentage = activity.percentage;
+    if (percentage >= 90) activity.performanceLevel = "EXCELLENT";
+    else if (percentage >= 75) activity.performanceLevel = "GOOD";
+    else if (percentage >= 50) activity.performanceLevel = "AVERAGE";
+    else if (percentage >= 30) activity.performanceLevel = "POOR";
+    else activity.performanceLevel = "FAILING";
+    
     await activity.save();
     
     console.log("Updated score for student:", student.name, "Score:", parsedScore);
+    
+    // ===== AUTOMATIC SLOW LEARNER UPDATE =====
+    await exports.updateSlowLearnerProgress(student._id, activity, req.user.schoolId);
     
     res.json({
       success: true,
@@ -358,7 +391,7 @@ exports.getStudentActivities = async (req, res) => {
       });
     }
     
-    // Find the student by their MongoDB _id or display ID
+    // Find the student
     let student;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(studentId);
     
@@ -728,6 +761,343 @@ exports.getActivityTrends = async (req, res) => {
   }
 };
 
+// ==================== AUTO-DETECT SLOW LEARNERS ====================
+
+exports.autoDetectSlowLearners = async (req, res) => {
+  try {
+    const { grade, className, term, threshold } = req.query;
+    const performanceThreshold = parseFloat(threshold) || 50;
+    const currentTerm = term || "TERM1";
+    const currentYear = new Date().getFullYear();
+    
+    let filter = { 
+      school: req.user.schoolId,
+      term: currentTerm,
+      academicYear: currentYear
+    };
+    if (grade) filter.grade = grade;
+    if (className) filter.className = className;
+    
+    console.log("Auto-detect filter:", filter);
+    
+    const activities = await Activity.find(filter)
+      .populate("student", "name studentId grade className")
+      .sort({ date: -1 });
+    
+    if (activities.length === 0) {
+      return res.json({
+        success: true,
+        slowLearners: [],
+        summary: {
+          totalStudents: 0,
+          slowLearnersFound: 0,
+          threshold: performanceThreshold,
+          message: "No activities found for the selected filters"
+        }
+      });
+    }
+    
+    // Group by student
+    const studentPerformance = {};
+    activities.forEach(activity => {
+      if (!activity.student) return;
+      const studentId = activity.student._id.toString();
+      if (!studentPerformance[studentId]) {
+        studentPerformance[studentId] = {
+          student: activity.student,
+          activities: [],
+          totalMarks: 0,
+          totalPossible: 0,
+          count: 0
+        };
+      }
+      const marksObtained = activity.marksObtained || activity.score || 0;
+      const marksTotal = activity.marksTotal || activity.maxScore || 100;
+      
+      studentPerformance[studentId].activities.push({
+        marksObtained: marksObtained,
+        marksTotal: marksTotal,
+        percentage: marksTotal > 0 ? (marksObtained / marksTotal) * 100 : 0,
+        date: activity.date,
+        title: activity.title,
+        activityId: activity._id
+      });
+      studentPerformance[studentId].totalMarks += marksObtained;
+      studentPerformance[studentId].totalPossible += marksTotal;
+      studentPerformance[studentId].count++;
+    });
+    
+    // Calculate averages and identify slow learners
+    const slowLearners = [];
+    Object.values(studentPerformance).forEach(data => {
+      let averagePercentage = 0;
+      if (data.totalPossible > 0) {
+        averagePercentage = (data.totalMarks / data.totalPossible) * 100;
+        averagePercentage = parseFloat(averagePercentage.toFixed(1));
+      }
+      
+      if (averagePercentage < performanceThreshold && data.count >= 3) {
+        slowLearners.push({
+          student: data.student,
+          averagePercentage: averagePercentage,
+          totalActivities: data.count,
+          recentActivities: data.activities.slice(-5),
+          status: "IDENTIFIED"
+        });
+      }
+    });
+    
+    slowLearners.sort((a, b) => a.averagePercentage - b.averagePercentage);
+    
+    res.json({
+      success: true,
+      slowLearners,
+      summary: {
+        totalStudents: Object.keys(studentPerformance).length,
+        slowLearnersFound: slowLearners.length,
+        threshold: performanceThreshold,
+        totalActivities: activities.length
+      }
+    });
+  } catch (error) {
+    console.error("Auto-detect slow learners error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+// ==================== AUTO-CREATE SLOW LEARNER CASES ====================
+
+exports.autoCreateSlowLearnerCases = async (req, res) => {
+  try {
+    const { grade, className, term, threshold, autoCreate } = req.body;
+    const performanceThreshold = parseFloat(threshold) || 50;
+    const currentTerm = term || "TERM1";
+    const currentYear = new Date().getFullYear();
+    const shouldCreate = autoCreate !== false;
+    
+    let filter = { 
+      school: req.user.schoolId,
+      term: currentTerm,
+      academicYear: currentYear
+    };
+    if (grade) filter.grade = grade;
+    if (className) filter.className = className;
+    
+    const activities = await Activity.find(filter)
+      .populate("student", "name studentId grade className")
+      .sort({ date: -1 });
+    
+    if (activities.length === 0) {
+      return res.json({
+        success: true,
+        message: "No activities found",
+        createdCases: [],
+        existingCases: [],
+        summary: { totalDetected: 0, created: 0, existing: 0 }
+      });
+    }
+    
+    // Group by student and calculate performance
+    const studentPerformance = {};
+    activities.forEach(activity => {
+      if (!activity.student) return;
+      const studentId = activity.student._id.toString();
+      if (!studentPerformance[studentId]) {
+        studentPerformance[studentId] = {
+          student: activity.student,
+          totalMarks: 0,
+          totalPossible: 0,
+          count: 0,
+          recentActivities: []
+        };
+      }
+      const marksObtained = activity.marksObtained || activity.score || 0;
+      const marksTotal = activity.marksTotal || activity.maxScore || 100;
+      studentPerformance[studentId].totalMarks += marksObtained;
+      studentPerformance[studentId].totalPossible += marksTotal;
+      studentPerformance[studentId].count++;
+      if (studentPerformance[studentId].recentActivities.length < 5) {
+        studentPerformance[studentId].recentActivities.push({
+          marksObtained,
+          marksTotal,
+          date: activity.date,
+          title: activity.title,
+          activityId: activity._id
+        });
+      }
+    });
+    
+    const createdCases = [];
+    const existingCases = [];
+    const detectedSlowLearners = [];
+    
+    for (const [studentId, data] of Object.entries(studentPerformance)) {
+      let averagePercentage = 0;
+      if (data.totalPossible > 0) {
+        averagePercentage = (data.totalMarks / data.totalPossible) * 100;
+        averagePercentage = parseFloat(averagePercentage.toFixed(1));
+      }
+      
+      if (averagePercentage < performanceThreshold && data.count >= 3) {
+        detectedSlowLearners.push({
+          student: data.student,
+          averagePercentage,
+          totalActivities: data.count
+        });
+        
+        const existing = await SlowLearner.findOne({
+          student: studentId,
+          semester: currentTerm,
+          academicYear: currentYear,
+          school: req.user.schoolId
+        });
+        
+        if (existing) {
+          existingCases.push({
+            student: data.student,
+            existingCase: existing,
+            averagePercentage
+          });
+          continue;
+        }
+        
+        if (!shouldCreate) continue;
+        
+        const slowLearner = new SlowLearner({
+          student: studentId,
+          studentName: data.student.name,
+          studentId: data.student.studentId,
+          grade: data.student.grade,
+          className: data.student.className,
+          problemDescription: `Auto-detected: Student performing below ${performanceThreshold}% in activities. Current average: ${averagePercentage}%`,
+          problemCategory: "OTHER",
+          measuresTaken: ["Auto-generated - Performance monitoring required"],
+          status: "IDENTIFIED",
+          recordedBy: req.user.id,
+          recordedByName: req.user.name || "System",
+          semester: currentTerm,
+          academicYear: currentYear,
+          school: req.user.schoolId,
+          generatedFromActivities: true,
+          averagePerformanceScore: averagePercentage
+        });
+        
+        data.recentActivities.forEach(activity => {
+          slowLearner.performanceHistory.push({
+            activityId: activity.activityId,
+            marksObtained: activity.marksObtained,
+            marksTotal: activity.marksTotal,
+            date: activity.date,
+            activityTitle: activity.title
+          });
+        });
+        
+        await slowLearner.save();
+        createdCases.push(slowLearner);
+      }
+    }
+    
+    res.json({
+      success: true,
+      message: `Created ${createdCases.length} new slow learner cases. ${existingCases.length} already exist.`,
+      createdCases,
+      existingCases,
+      detectedSlowLearners,
+      summary: {
+        totalDetected: detectedSlowLearners.length,
+        created: createdCases.length,
+        existing: existingCases.length
+      }
+    });
+  } catch (error) {
+    console.error("Auto-create slow learner cases error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+};
+
+// ==================== UPDATE SLOW LEARNER PROGRESS ====================
+
+exports.updateSlowLearnerProgress = async (studentId, activity, schoolId) => {
+  try {
+    if (!studentId || !activity) return null;
+    
+    const slowLearner = await SlowLearner.findOne({
+      student: studentId,
+      status: { $ne: "RESOLVED" },
+      school: schoolId
+    });
+    
+    if (!slowLearner) return null;
+    
+    const marksObtained = activity.marksObtained || activity.score || 0;
+    const marksTotal = activity.marksTotal || activity.maxScore || 100;
+    const percentage = marksTotal > 0 ? (marksObtained / marksTotal) * 100 : 0;
+    
+    slowLearner.performanceHistory.push({
+      activityId: activity._id,
+      marksObtained: marksObtained,
+      marksTotal: marksTotal,
+      date: activity.date || new Date(),
+      activityTitle: activity.title || "Activity"
+    });
+    
+    // Calculate new average
+    const totalMarks = slowLearner.performanceHistory.reduce((sum, p) => sum + p.marksObtained, 0);
+    const totalPossible = slowLearner.performanceHistory.reduce((sum, p) => sum + p.marksTotal, 0);
+    const newAverage = totalPossible > 0 ? (totalMarks / totalPossible) * 100 : 0;
+    slowLearner.averagePerformanceScore = parseFloat(newAverage.toFixed(1));
+    slowLearner.lastActivityScore = parseFloat(percentage.toFixed(1));
+    slowLearner.lastActivityDate = activity.date || new Date();
+    
+    // Determine trend based on last 5 activities
+    const recentScores = slowLearner.performanceHistory.slice(-5).map(p => 
+      p.marksTotal > 0 ? (p.marksObtained / p.marksTotal) * 100 : 0
+    );
+    
+    if (recentScores.length >= 3) {
+      const firstAvg = recentScores.slice(0, 3).reduce((a, b) => a + b, 0) / 3;
+      const lastAvg = recentScores.slice(-3).reduce((a, b) => a + b, 0) / 3;
+      if (lastAvg > firstAvg + 5) slowLearner.performanceTrend = "IMPROVING";
+      else if (lastAvg < firstAvg - 5) slowLearner.performanceTrend = "DECLINING";
+      else slowLearner.performanceTrend = "STABLE";
+    }
+    
+    // Auto-update status
+    if (slowLearner.averagePerformanceScore >= 70) {
+      slowLearner.status = "IMPROVING";
+      if (slowLearner.averagePerformanceScore >= 85) {
+        slowLearner.status = "RESOLVED";
+      }
+    } else if (slowLearner.performanceTrend === "DECLINING") {
+      slowLearner.status = "IN_PROGRESS";
+    }
+    
+    await slowLearner.save();
+    return slowLearner;
+  } catch (error) {
+    console.error("Update slow learner progress error:", error);
+    return null;
+  }
+};
+
+// ==================== UPDATE SLOW LEARNER AFTER ACTIVITY ====================
+
+exports.updateSlowLearnerAfterActivity = async (activity, schoolId) => {
+  try {
+    if (!activity || !activity.student) return null;
+    return await exports.updateSlowLearnerProgress(activity.student, activity, schoolId);
+  } catch (error) {
+    console.error("Update slow learner after activity error:", error);
+    return null;
+  }
+};
+
 // ==================== LEGACY FUNCTIONS ====================
 
 exports.createActivity = async (req, res) => {
@@ -745,7 +1115,6 @@ exports.createActivity = async (req, res) => {
       });
     }
     
-    // Find student by _id or studentId
     let student;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(studentId);
     
@@ -776,6 +1145,13 @@ exports.createActivity = async (req, res) => {
     
     const percentage = calculatePercentage(parsedScore, parsedMaxScore);
     
+    let performanceLevel = "AVERAGE";
+    if (percentage >= 90) performanceLevel = "EXCELLENT";
+    else if (percentage >= 75) performanceLevel = "GOOD";
+    else if (percentage >= 50) performanceLevel = "AVERAGE";
+    else if (percentage >= 30) performanceLevel = "POOR";
+    else performanceLevel = "FAILING";
+    
     const activityData = {
       student: student._id,
       studentName: student.name,
@@ -790,6 +1166,9 @@ exports.createActivity = async (req, res) => {
       score: parsedScore,
       maxScore: parsedMaxScore,
       percentage: percentage,
+      marksObtained: parsedScore,
+      marksTotal: parsedMaxScore,
+      performanceLevel: performanceLevel,
       date: date || new Date(),
       term,
       academicYear: new Date().getFullYear(),
@@ -797,11 +1176,16 @@ exports.createActivity = async (req, res) => {
       recordedBy: req.user.id,
       recordedByName: req.user.name || req.user.email || "Unknown",
       school: req.user.schoolId,
-      batchId: null
+      batchId: null,
+      isSlowLearnerActivity: false,
+      slowLearnerCaseId: null
     };
     
     const activity = new Activity(activityData);
     await activity.save();
+    
+    // Update slow learner progress
+    await exports.updateSlowLearnerProgress(student._id, activity, req.user.schoolId);
     
     const populatedActivity = await Activity.findById(activity._id)
       .populate("student", "name studentId")
@@ -886,7 +1270,6 @@ exports.getStudentPerformanceByCourse = async (req, res) => {
       });
     }
     
-    // Find student by _id or studentId
     let student;
     const isObjectId = /^[0-9a-fA-F]{24}$/.test(studentId);
     
@@ -909,7 +1292,6 @@ exports.getStudentPerformanceByCourse = async (req, res) => {
       school: req.user.schoolId
     }).populate("course", "courseName");
     
-    // Group by course
     const byCourse = {};
     (activities || []).forEach(a => {
       const courseName = a.course?.courseName || "Unknown";

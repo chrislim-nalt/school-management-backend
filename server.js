@@ -19,12 +19,9 @@ const allowedOrigins = [
 
 console.log("CORS allowed origins:", allowedOrigins);
 
-// CORS middleware with proper error handling
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
@@ -42,14 +39,12 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Log all requests
 app.use((req, res, next) => {
   console.log(`✅ ${req.method} ${req.url}`);
   next();
 });
 
 // ==================== ROUTES ====================
-// Import routes
 const authRoutes = require("./routes/auth");
 const studentRoutes = require("./routes/studentRoutes");
 const teacherRoutes = require("./routes/teacherRoutes");
@@ -81,7 +76,10 @@ const projectedNeedsRoutes = require("./routes/projectedNeedRoutes");
 const stockPeriodRoutes = require("./routes/stockPeriodRoutes");
 const stockRecordRoutes = require("./routes/stockRecordRoutes");
 
-// Use routes - NO WILDCARD '*' ROUTES HERE
+// ===== NEW: Fee Routes =====
+const feeRoutes = require("./routes/feeRoutes");
+
+// Use routes
 app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/teachers", teacherRoutes);
@@ -112,6 +110,9 @@ app.use("/api/projected-needs", projectedNeedsRoutes);
 app.use("/api/stock-periods", stockPeriodRoutes);
 app.use("/api/stock-records", stockRecordRoutes);
 
+// ===== NEW: Fee Routes =====
+app.use("/api/fees", feeRoutes);
+
 // Health check
 app.get("/health", (req, res) => {
   res.json({ 
@@ -122,7 +123,6 @@ app.get("/health", (req, res) => {
 });
 
 // ==================== 404 HANDLER ====================
-// This catches all unmatched routes - USE app.use NOT app.get('*')
 app.use((req, res) => {
   console.log(`❌ 404 - Route not found: ${req.method} ${req.url}`);
   res.status(404).json({ 
@@ -163,6 +163,7 @@ connectDB().then(() => {
     console.log(`📦 Inventory API: http://localhost:${PORT}/api/items`);
     console.log(`🎓 School Management API: http://localhost:${PORT}/api/teachers`);
     console.log(`👥 Visitor API: http://localhost:${PORT}/api/visitors`);
+    console.log(`💰 Fees API: http://localhost:${PORT}/api/fees`);
     console.log(`📊 MongoDB Status: Connected ✅`);
     console.log(`============================================================\n`);
   });
