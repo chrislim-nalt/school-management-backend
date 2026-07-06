@@ -3,6 +3,7 @@ const router = express.Router();
 const activityController = require("../controllers/activityController");
 const authMiddleware = require("../middleware/authMiddleware");
 const { authorize } = require("../middleware/authMiddleware");
+const Activity = require("../models/Activity"); // FIX: was missing, caused ReferenceError on /update-slow-learner/:activityId
 
 // Apply auth middleware to all routes
 router.use(authMiddleware);
@@ -17,6 +18,12 @@ router.post("/assign-to-class",
 router.get("/class", 
   authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
   activityController.getClassActivities
+);
+
+// School-wide recent activity feed for dashboards (no grade/className filter required)
+router.get("/recent", 
+  authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
+  activityController.getRecentActivities
 );
 
 router.get("/class-performance", 

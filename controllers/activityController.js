@@ -270,6 +270,69 @@ exports.getClassActivities = async (req, res) => {
   }
 };
 
+// ==================== GET RECENT ACTIVITIES (SCHOOL-WIDE, NO GRADE/CLASS REQUIRED) ====================
+// Used by dashboards (School Dashboard, Teacher Dashboard) to show a live feed
+// of the latest activity marks across the whole school (or scoped to a teacher),
+// without needing a specific grade/className like getClassActivities requires.
+
+exports.getRecentActivities = async (req, res) => {
+  try {
+    const { term, academicYear, limit, grade, className, teacherId } = req.query;
+
+    let filter = { school: req.user.schoolId };
+    if (term) filter.term = term;
+    if (academicYear) filter.academicYear = parseInt(academicYear);
+    if (grade) filter.grade = grade;
+    if (className) filter.className = className;
+    // Allow scoping to activities recorded by a specific teacher (e.g. teacher dashboard)
+    if (teacherId) filter.recordedBy = teacherId;
+
+    const recordLimit = Math.min(parseInt(limit) || 15, 100);
+
+    const activities = await Activity.find(filter)
+      .sort({ date: -1, createdAt: -1 })
+      .limit(recordLimit)
+      .lean();
+
+    const formatted = activities.map(a => {
+      const marksObtained = a.marksObtained ?? a.score ?? 0;
+      const marksTotal = a.marksTotal ?? a.maxScore ?? 100;
+      const percentage = marksTotal > 0
+        ? parseFloat(((marksObtained / marksTotal) * 100).toFixed(1))
+        : (a.percentage || 0);
+
+      return {
+        activityId: a._id,
+        title: a.title,
+        studentName: a.studentName,
+        studentId: a.studentId,
+        grade: a.grade,
+        className: a.className,
+        courseName: a.courseName,
+        activityType: a.activityType,
+        marksObtained,
+        marksTotal,
+        percentage,
+        performanceLevel: a.performanceLevel || "AVERAGE",
+        date: a.date,
+        batchId: a.batchId || null
+      };
+    });
+
+    res.json({
+      success: true,
+      activities: formatted,
+      count: formatted.length
+    });
+  } catch (error) {
+    console.error("Get recent activities error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // ==================== UPDATE STUDENT SCORE ====================
 
 exports.updateStudentScore = async (req, res) => {
