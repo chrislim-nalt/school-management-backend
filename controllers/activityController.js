@@ -828,16 +828,20 @@ exports.getActivityTrends = async (req, res) => {
 
 exports.autoDetectSlowLearners = async (req, res) => {
   try {
-    const { grade, className, term, threshold } = req.query;
+    const { grade, className, term, threshold, academicYear } = req.query;
     const performanceThreshold = parseFloat(threshold) || 50;
     const currentTerm = term || "TERM1";
-    const currentYear = new Date().getFullYear();
     
     let filter = { 
       school: req.user.schoolId,
-      term: currentTerm,
-      academicYear: currentYear
+      term: currentTerm
     };
+    // FIX: academicYear used to be hardcoded to new Date().getFullYear(),
+    // which silently returned zero activities whenever the stored
+    // academicYear on a document didn't exactly match "this server year"
+    // at request time — even though grade/className/term all matched fine
+    // in getClassActivities. Now it's optional, same pattern as grade/className.
+    if (academicYear) filter.academicYear = parseInt(academicYear);
     if (grade) filter.grade = grade;
     if (className) filter.className = className;
     
@@ -935,17 +939,21 @@ exports.autoDetectSlowLearners = async (req, res) => {
 
 exports.autoCreateSlowLearnerCases = async (req, res) => {
   try {
-    const { grade, className, term, threshold, autoCreate } = req.body;
+    const { grade, className, term, threshold, autoCreate, academicYear } = req.body;
     const performanceThreshold = parseFloat(threshold) || 50;
     const currentTerm = term || "TERM1";
-    const currentYear = new Date().getFullYear();
+    const currentYear = new Date().getFullYear(); // still used for new case records + existing-case dedup below
     const shouldCreate = autoCreate !== false;
     
     let filter = { 
       school: req.user.schoolId,
-      term: currentTerm,
-      academicYear: currentYear
+      term: currentTerm
     };
+    // FIX: same bug as autoDetectSlowLearners — this used to force
+    // academicYear: currentYear on the ACTIVITY query, which silently
+    // returned zero activities whenever a document's stored academicYear
+    // didn't match "this server year" exactly. Now optional, like grade/className.
+    if (academicYear) filter.academicYear = parseInt(academicYear);
     if (grade) filter.grade = grade;
     if (className) filter.className = className;
     
