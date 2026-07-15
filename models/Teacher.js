@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const teacherSchema = new mongoose.Schema({
-  teacherId: { type: String }, // no longer globally unique — see compound index below
+  teacherId: { type: String }, // no longer globally unique — see compound index + prefix below
   name: { type: String, required: true },
   email: { type: String, required: true },
   phone: { type: String, default: "" },
@@ -19,24 +19,39 @@ const teacherSchema = new mongoose.Schema({
   school: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true }
 }, { timestamps: true });
 
-// Uniqueness is scoped PER SCHOOL, not global.
-// This lets every school independently have a TCH-0001, TCH-0002, etc.
+// Belt-and-suspenders: even though prefixed IDs are already unique per school,
+// this compound index guarantees it at the DB level too.
 teacherSchema.index({ school: 1, teacherId: 1 }, { unique: true });
 teacherSchema.index({ school: 1, email: 1 }, { unique: true });
-
-// Static method to generate teacher ID
-teacherSchema.statics.generateTeacherId = async function(schoolId) {
-  const Teacher = this;
-  const lastTeacher = await Teacher.findOne({
-    school: schoolId
-  }).sort({ createdAt: -1 }).limit(1);
-
-  let lastId = 0;
-  if (lastTeacher && lastTeacher.teacherId) {
-    const match = lastTeacher.teacherId.match(/\d+/);
-    if (match) lastId = parseInt(match[0]);
+async function getSchoolPrefix(schoolId) {
+  try {
+    const School = mongoose.model("School");
+    const school = await School.findById(schoolId).select("name code shortCode schoolCode");
+    const source =
+      school?.code || school?.shortCode || school?.schoolCode || school?.name || "";
+    const cleaned = source.toString().replace(/[^a-zA-Z]/g, "").toUpperCase();
+    return cleaned.slice(0, 4) || String(schoolId).slice(-4).toUpperCase();
+  } catch {
+    return String(schoolId).slice(-4).toUpperCase();
   }
-  return `TCH-${String(lastId + 1).padStart(4, '0')}`;
+}
+
+// Static method to generate teacher ID, now prefixed per school
+teacherSchema.statics.generateTeacherId = async function (schoolId) {
+  const Teacher = this;
+  const prefix = await getSchoolPrefix(schoolId);
+
+  const lastTeacher = await Teacher.findOne({ school: schoolId })
+    .sort({ createdAt: -1 })
+    .limit(1);
+
+  let lastNum = 0;
+  if (lastTeacher && lastTeacher.teacherId) {
+    const match = lastTeacher.teacherId.match(/(\d+)$/); // trailing number, prefix-agnostic
+    if (match) lastNum = parseInt(match[1]);
+  }
+
+  return `${prefix}-TCH-${String(lastNum + 1).padStart(4, "0")}`;
 };
 
 module.exports = mongoose.model("Teacher", teacherSchema);
