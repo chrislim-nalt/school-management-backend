@@ -17,6 +17,7 @@ router.put("/schools/:id/suspend", authorize(["superadmin"]), adminController.su
 router.put("/schools/:id/activate", authorize(["superadmin"]), adminController.activateSchool);
 router.delete("/schools/:id", authorize(["superadmin"]), adminController.deleteSchool);
 router.put("/schools/:id/subscription", authorize(["superadmin"]), adminController.updateSubscription);
+router.put("/schools/:id/layout-features", authorize(["superadmin"]), adminController.updateLayoutFeatures);
 
 // ==================== USER MANAGEMENT ====================
 // Super Admin - access all users

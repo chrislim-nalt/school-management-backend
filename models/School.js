@@ -41,6 +41,26 @@ const schoolSchema = new mongoose.Schema({
         maxUsers: { type: Number, default: 10 },
         currency: { type: String, default: "RWF" },
     },
+    // Controls which optional sidebar/menu features are visible for this school.
+    // All default to true so existing schools are unaffected until a super admin
+    // explicitly hides something for them.
+    layoutFeatures: {
+        fees: { type: Boolean, default: true },
+        transport: { type: Boolean, default: true },
+        library: { type: Boolean, default: true },
+        laboratory: { type: Boolean, default: true },
+        discipline: { type: Boolean, default: true },
+        englishPerformance: { type: Boolean, default: true },
+        slowLearners: { type: Boolean, default: true },
+        visitors: { type: Boolean, default: true },
+        homework: { type: Boolean, default: true },
+        activities: { type: Boolean, default: true },
+        assets: { type: Boolean, default: true },
+        trackedAssets: { type: Boolean, default: true },
+        cleaningSupplies: { type: Boolean, default: true },
+        feeding: { type: Boolean, default: true },
+        borrowed: { type: Boolean, default: true },
+    },
     createdAt: { type: Date, default: Date.now }
 });
 

@@ -65,7 +65,8 @@ exports.login = async (req, res) => {
                 school: { 
                     id: school._id, 
                     name: school.name, 
-                    code: school.schoolCode 
+                    code: school.schoolCode,
+                    layoutFeatures: school.layoutFeatures
                 } 
             } 
         });
@@ -170,7 +171,7 @@ exports.getProfile = async (req, res) => {
     try {
         const user = await User.findById(req.user.id)
             .select("-password -resetOtp -resetOtpExpires")
-            .populate("school", "name schoolCode status");
+            .populate("school", "name schoolCode status layoutFeatures");
         
         if (!user) {
             return res.status(404).json({ message: "User not found" });

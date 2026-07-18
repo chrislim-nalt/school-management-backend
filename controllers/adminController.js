@@ -449,6 +449,47 @@ exports.updateSubscription = async (req, res) => {
     }
 };
 
+// Update layout features (show/hide sidebar features for a specific school)
+exports.updateLayoutFeatures = async (req, res) => {
+    try {
+        const school = await School.findById(req.params.id);
+        if (!school) return res.status(404).json({ message: "School not found" });
+
+        const { layoutFeatures } = req.body;
+        if (!layoutFeatures || typeof layoutFeatures !== "object") {
+            return res.status(400).json({ message: "layoutFeatures object is required" });
+        }
+
+        // Only known keys are allowed through, and only booleans are accepted.
+        const allowedKeys = [
+            "fees", "transport", "library", "laboratory", "discipline",
+            "englishPerformance", "slowLearners", "visitors", "homework",
+            "activities", "assets", "trackedAssets", "cleaningSupplies",
+            "feeding", "borrowed"
+        ];
+
+        if (!school.layoutFeatures) school.layoutFeatures = {};
+
+        allowedKeys.forEach((key) => {
+            if (typeof layoutFeatures[key] === "boolean") {
+                school.layoutFeatures[key] = layoutFeatures[key];
+            }
+        });
+
+        school.markModified("layoutFeatures");
+        await school.save();
+
+        res.json({
+            success: true,
+            message: "Layout settings updated successfully",
+            school
+        });
+    } catch (error) {
+        console.error("Update layout features error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // ==================== USER MANAGEMENT ====================
 
 // Get all users (Super Admin - all schools)
