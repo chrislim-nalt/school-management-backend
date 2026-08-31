@@ -29,4 +29,14 @@ router.get("/student/:studentId",
   feeController.getStudentFeeSummary
 );
 
+router.put("/:id", 
+  authorize("superadmin", "school_admin", "admin", "bursar"), 
+  feeController.updateFee
+);
+
+router.delete("/:id", 
+  authorize("superadmin", "school_admin", "admin", "bursar"), 
+  feeController.deleteFee
+);
+
 module.exports = router;
