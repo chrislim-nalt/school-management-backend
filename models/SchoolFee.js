@@ -34,6 +34,16 @@ const schoolFeeSchema = new mongoose.Schema({
     enum: ["PAID", "PARTIAL", "UNPAID", "OVERDUE"],
     default: "UNPAID"
   },
+
+  // Follow-up info for partial/unpaid balances — lets a bursar record who
+  // promised to pay the remainder and by when, so it can be chased up.
+  // Only meaningful while balance > 0; cleared once the fee is fully paid.
+  followUp: {
+    parentName: { type: String, default: "" },
+    parentPhone: { type: String, default: "" },
+    promiseDate: { type: Date, default: null }, // date the remaining balance was promised to be paid
+    notes: { type: String, default: "" }
+  },
   
   school: { type: mongoose.Schema.Types.ObjectId, ref: "School", required: true }
 }, { timestamps: true });
@@ -43,5 +53,6 @@ schoolFeeSchema.index({ student: 1, term: 1, academicYear: 1 });
 schoolFeeSchema.index({ school: 1, status: 1 });
 schoolFeeSchema.index({ school: 1, grade: 1, className: 1 });
 schoolFeeSchema.index({ balance: -1 });
+schoolFeeSchema.index({ school: 1, "followUp.promiseDate": 1 });
 
 module.exports = mongoose.model("SchoolFee", schoolFeeSchema);

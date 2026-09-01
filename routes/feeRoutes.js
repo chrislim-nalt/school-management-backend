@@ -24,6 +24,11 @@ router.get("/outstanding",
   feeController.getOutstandingFees
 );
 
+router.get("/follow-ups", 
+  authorize("superadmin", "school_admin", "admin", "bursar"), 
+  feeController.getPaymentFollowUps
+);
+
 router.get("/student/:studentId", 
   authorize("superadmin", "school_admin", "admin", "bursar", "teacher"), 
   feeController.getStudentFeeSummary
