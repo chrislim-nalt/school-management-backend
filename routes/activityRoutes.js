@@ -26,6 +26,30 @@ router.get("/recent",
   activityController.getRecentActivities
 );
 
+// Distinct dates that have assigned activities, for the "previous dates" dropdown
+router.get("/dates", 
+  authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
+  activityController.getActivityDates
+);
+
+// Edit an already-assigned activity's details (title, instructions, max score, type, date)
+router.put("/batch/:batchId", 
+  authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
+  activityController.updateActivityBatch
+);
+
+// Delete an already-assigned activity (all student records under it)
+router.delete("/batch/:batchId", 
+  authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
+  activityController.deleteActivityBatch
+);
+
+// Save marks for every student in an assigned activity in a single request
+router.put("/batch/:batchId/scores", 
+  authorize("superadmin", "school_admin", "admin", "teacher", "staff"), 
+  activityController.bulkUpdateBatchScores
+);
+
 router.get("/class-performance", 
   authorize("superadmin", "school_admin", "admin"), 
   activityController.getClassPerformanceDashboard

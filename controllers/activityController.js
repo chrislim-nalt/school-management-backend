@@ -209,8 +209,12 @@ exports.getClassActivities = async (req, res) => {
           groupedByBatch[a.batchId] = {
             batchId: a.batchId,
             title: a.title,
+            description: a.description || "",
             activityType: a.activityType,
             courseName: a.courseName,
+            course: a.course,
+            grade: a.grade,
+            className: a.className,
             maxScore: a.maxScore,
             date: a.date,
             term: a.term,
@@ -267,6 +271,202 @@ exports.getClassActivities = async (req, res) => {
       success: false, 
       message: error.message 
     });
+  }
+};
+
+// ==================== GET DISTINCT ACTIVITY DATES (for the date dropdown) ====================
+// Powers the "previous dates" dropdown for a given grade/class/course: returns
+// every distinct day that has at least one assigned activity, newest first,
+// along with how many separate assignments (batches) fall on that day.
+exports.getActivityDates = async (req, res) => {
+  try {
+    const { grade, className, courseId, term } = req.query;
+
+    if (!grade || !className || !courseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Grade, class name and course are required"
+      });
+    }
+
+    let filter = { school: req.user.schoolId, grade, className, course: courseId };
+    if (term) filter.term = term;
+
+    const activities = await Activity.find(filter).select("date batchId").lean();
+
+    // Group by calendar day (not by exact timestamp) and count distinct batches per day.
+    const dayMap = {};
+    for (const a of activities) {
+      const day = new Date(a.date).toISOString().slice(0, 10); // YYYY-MM-DD
+      if (!dayMap[day]) dayMap[day] = new Set();
+      if (a.batchId) dayMap[day].add(a.batchId);
+    }
+
+    const dates = Object.keys(dayMap)
+      .sort((a, b) => new Date(b) - new Date(a)) // newest first
+      .map(day => ({ date: day, batchCount: dayMap[day].size }));
+
+    res.json({
+      success: true,
+      dates
+    });
+  } catch (error) {
+    console.error("Get activity dates error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// ==================== UPDATE ASSIGNED ACTIVITY (BATCH-LEVEL DETAILS) ====================
+// Lets a teacher fix a mistake in an already-assigned activity — title,
+// instructions, activity type, max score, or date — without deleting and
+// recreating it. Applies to every student record sharing this batchId.
+exports.updateActivityBatch = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { title, description, activityType, maxScore, date } = req.body;
+
+    const batchActivities = await Activity.find({ batchId, school: req.user.schoolId });
+    if (batchActivities.length === 0) {
+      return res.status(404).json({ success: false, message: "Assigned activity not found" });
+    }
+
+    const newMaxScore = maxScore !== undefined && maxScore !== null && maxScore !== ""
+      ? parseFloat(maxScore)
+      : null;
+    let scoresClamped = 0;
+
+    const updates = batchActivities.map(async (activity) => {
+      if (title) activity.title = title.trim();
+      if (description !== undefined) activity.description = description;
+      if (activityType) activity.activityType = activityType;
+      if (date) activity.date = date;
+
+      if (newMaxScore && newMaxScore > 0) {
+        activity.maxScore = newMaxScore;
+        // If the new max is lower than a student's existing score, clamp it
+        // down rather than leaving an invalid score above the new maximum.
+        if (activity.score > newMaxScore) {
+          activity.score = newMaxScore;
+          scoresClamped++;
+        }
+        activity.marksTotal = newMaxScore;
+        activity.marksObtained = activity.score;
+        activity.percentage = calculatePercentage(activity.score, newMaxScore);
+
+        const pct = activity.percentage;
+        if (pct >= 90) activity.performanceLevel = "EXCELLENT";
+        else if (pct >= 75) activity.performanceLevel = "GOOD";
+        else if (pct >= 50) activity.performanceLevel = "AVERAGE";
+        else if (pct >= 30) activity.performanceLevel = "POOR";
+        else activity.performanceLevel = "FAILING";
+      }
+
+      return activity.save();
+    });
+
+    await Promise.all(updates);
+
+    res.json({
+      success: true,
+      message: scoresClamped > 0
+        ? `Assigned activity updated. ${scoresClamped} student score(s) were reduced to fit the new max score.`
+        : "Assigned activity updated successfully",
+      updatedCount: batchActivities.length,
+      scoresClamped
+    });
+  } catch (error) {
+    console.error("Update activity batch error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== DELETE ASSIGNED ACTIVITY (BATCH-LEVEL) ====================
+exports.deleteActivityBatch = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    const result = await Activity.deleteMany({ batchId, school: req.user.schoolId });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Assigned activity not found" });
+    }
+
+    res.json({
+      success: true,
+      message: "Assigned activity deleted successfully",
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error("Delete activity batch error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ==================== BULK UPDATE SCORES FOR A WHOLE BATCH ====================
+// Lets a teacher save marks for every student in an assigned activity in one
+// request, instead of one PUT per student. Body: { scores: { activityId: score } }
+exports.bulkUpdateBatchScores = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { scores } = req.body;
+
+    if (!scores || typeof scores !== "object" || Object.keys(scores).length === 0) {
+      return res.status(400).json({ success: false, message: "No scores provided" });
+    }
+
+    const batchActivities = await Activity.find({ batchId, school: req.user.schoolId });
+    if (batchActivities.length === 0) {
+      return res.status(404).json({ success: false, message: "Assigned activity not found" });
+    }
+
+    const errors = [];
+    const updated = [];
+
+    for (const activity of batchActivities) {
+      const rawScore = scores[activity._id.toString()];
+      if (rawScore === undefined || rawScore === null || rawScore === "") continue; // leave untouched
+
+      const parsedScore = parseFloat(rawScore);
+      if (isNaN(parsedScore) || parsedScore < 0 || parsedScore > activity.maxScore) {
+        errors.push({
+          studentName: activity.studentName,
+          studentId: activity.studentId,
+          error: `Score must be between 0 and ${activity.maxScore}`
+        });
+        continue;
+      }
+
+      activity.score = parsedScore;
+      activity.marksObtained = parsedScore;
+      activity.marksTotal = activity.maxScore;
+      activity.percentage = calculatePercentage(parsedScore, activity.maxScore);
+
+      const pct = activity.percentage;
+      if (pct >= 90) activity.performanceLevel = "EXCELLENT";
+      else if (pct >= 75) activity.performanceLevel = "GOOD";
+      else if (pct >= 50) activity.performanceLevel = "AVERAGE";
+      else if (pct >= 30) activity.performanceLevel = "POOR";
+      else activity.performanceLevel = "FAILING";
+
+      await activity.save();
+      updated.push(activity);
+
+      // Keep slow learner tracking in sync, same as the single-student flow.
+      await exports.updateSlowLearnerProgress(activity.student, activity, req.user.schoolId);
+    }
+
+    res.json({
+      success: true,
+      message: `${updated.length} score(s) saved successfully${errors.length > 0 ? `, ${errors.length} skipped` : ""}`,
+      updatedCount: updated.length,
+      errors
+    });
+  } catch (error) {
+    console.error("Bulk update batch scores error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
