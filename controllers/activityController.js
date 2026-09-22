@@ -218,6 +218,8 @@ exports.getClassActivities = async (req, res) => {
             maxScore: a.maxScore,
             date: a.date,
             term: a.term,
+            recordedBy: a.recordedBy || null,
+            createdByName: a.recordedByName || "Unknown",
             students: [],
             activityIds: {}
           };
@@ -515,7 +517,9 @@ exports.getRecentActivities = async (req, res) => {
         percentage,
         performanceLevel: a.performanceLevel || "AVERAGE",
         date: a.date,
-        batchId: a.batchId || null
+        batchId: a.batchId || null,
+        recordedBy: a.recordedBy || null,
+        createdByName: a.recordedByName || "Unknown"
       };
     });
 
