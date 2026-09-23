@@ -193,73 +193,38 @@ exports.createStudent = async (req, res) => {
   } catch (error) {
     console.error("Create student error:", error);
     
-    // Handle duplicate key error
+    // Handle duplicate key error with ONE clean retry using the real
+    // prefixed ID generator (Student.getNextStudentId). This used to fall
+    // back through several layers of ad-hoc "STD-XXXX" IDs left over from
+    // before per-school prefixes existed — those were never actually
+    // collision-proof and just papered over the real bug. Now that prefixes
+    // are derived from each school's own unique schoolCode (see Student.js),
+    // a genuine duplicate here should be extremely rare; this retry exists
+    // only to absorb a rare race condition (two requests at the same instant).
     if (error.code === 11000) {
-      // If duplicate key error, try one more time with a new ID
       try {
-        console.log("Duplicate key error, retrying with new ID...");
-        
-        // Get the max ID directly from the database
-        const allStudents = await Student.find({ 
-          school: req.user.schoolId
-        }).select('studentId');
-        
-        let maxId = 0;
-        for (const student of allStudents) {
-          if (student.studentId) {
-            const match = student.studentId.match(/STD-(\d+)/);
-            if (match && match[1]) {
-              const num = parseInt(match[1]);
-              if (!isNaN(num) && num > maxId) {
-                maxId = num;
-              }
-            }
-          }
-        }
-        
-        const newId = maxId + 1;
-        const paddedId = String(newId).padStart(4, '0');
-        const newStudentId = `STD-${paddedId}`;
-        
-        console.log(`Retry with new ID: ${newStudentId} (max was ${maxId})`);
-        
-        // Update the studentData with new ID
-        const retryData = { ...req.body };
-        retryData.studentId = newStudentId;
-        retryData.name = req.body.name.trim();
-        retryData.grade = req.body.grade;
-        retryData.className = req.body.className;
-        retryData.school = req.user.schoolId;
-        retryData.dateOfBirth = req.body.dateOfBirth || null;
-        retryData.gender = req.body.gender || "MALE";
-        retryData.address = req.body.address || "";
-        retryData.parentName = req.body.parentName || "";
-        retryData.parentPhone = req.body.parentPhone || "";
-        retryData.parentEmail = req.body.parentEmail || "";
-        retryData.parentOccupation = req.body.parentOccupation || "";
-        retryData.parentAddress = req.body.parentAddress || "";
-        retryData.emergencyContact = req.body.emergencyContact || "";
-        retryData.emergencyContactPhone = req.body.emergencyContactPhone || "";
-        retryData.emergencyRelationship = req.body.emergencyRelationship || "";
-        retryData.medicalInfo = req.body.medicalInfo || "";
-        retryData.allergies = req.body.allergies || "";
-        retryData.bloodGroup = req.body.bloodGroup || "";
-        retryData.previousSchool = req.body.previousSchool || "";
-        retryData.transportSubscribed = req.body.transportSubscribed || false;
-        retryData.transportRoute = req.body.transportRoute || "";
-        retryData.transportPickupPoint = req.body.transportPickupPoint || "";
-        retryData.transportDropoffPoint = req.body.transportDropoffPoint || "";
-        retryData.status = req.body.status || "ACTIVE";
-        
+        console.log("Duplicate key error, retrying with a fresh ID...");
+        const retryStudentId = await Student.getNextStudentId(req.user.schoolId);
+
+        const retryData = {
+          ...req.body,
+          studentId: retryStudentId,
+          name: req.body.name.trim(),
+          school: req.user.schoolId,
+          dateOfBirth: req.body.dateOfBirth || null,
+          gender: req.body.gender || "MALE",
+          status: req.body.status || "ACTIVE"
+        };
+
         const retryStudent = new Student(retryData);
         const savedStudent = await retryStudent.save();
-        
+
         console.log("Student created successfully on retry:", {
           id: savedStudent._id,
           studentId: savedStudent.studentId,
           name: savedStudent.name
         });
-        
+
         return res.status(201).json({
           success: true,
           message: "Student created successfully",
@@ -267,62 +232,10 @@ exports.createStudent = async (req, res) => {
         });
       } catch (retryError) {
         console.error("Retry create student error:", retryError);
-        
-        // One more attempt with timestamp-based ID
-        try {
-          console.log("Final attempt with timestamp-based ID...");
-          const timestamp = Date.now().toString().slice(-8);
-          const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-          const finalId = `STD-${timestamp}${randomSuffix}`;
-          
-          const finalData = { ...req.body };
-          finalData.studentId = finalId;
-          finalData.name = req.body.name.trim();
-          finalData.grade = req.body.grade;
-          finalData.className = req.body.className;
-          finalData.school = req.user.schoolId;
-          finalData.dateOfBirth = req.body.dateOfBirth || null;
-          finalData.gender = req.body.gender || "MALE";
-          finalData.address = req.body.address || "";
-          finalData.parentName = req.body.parentName || "";
-          finalData.parentPhone = req.body.parentPhone || "";
-          finalData.parentEmail = req.body.parentEmail || "";
-          finalData.parentOccupation = req.body.parentOccupation || "";
-          finalData.parentAddress = req.body.parentAddress || "";
-          finalData.emergencyContact = req.body.emergencyContact || "";
-          finalData.emergencyContactPhone = req.body.emergencyContactPhone || "";
-          finalData.emergencyRelationship = req.body.emergencyRelationship || "";
-          finalData.medicalInfo = req.body.medicalInfo || "";
-          finalData.allergies = req.body.allergies || "";
-          finalData.bloodGroup = req.body.bloodGroup || "";
-          finalData.previousSchool = req.body.previousSchool || "";
-          finalData.transportSubscribed = req.body.transportSubscribed || false;
-          finalData.transportRoute = req.body.transportRoute || "";
-          finalData.transportPickupPoint = req.body.transportPickupPoint || "";
-          finalData.transportDropoffPoint = req.body.transportDropoffPoint || "";
-          finalData.status = req.body.status || "ACTIVE";
-          
-          const finalStudent = new Student(finalData);
-          const savedStudent = await finalStudent.save();
-          
-          console.log("Student created successfully with timestamp ID:", {
-            id: savedStudent._id,
-            studentId: savedStudent.studentId,
-            name: savedStudent.name
-          });
-          
-          return res.status(201).json({
-            success: true,
-            message: "Student created successfully",
-            student: savedStudent
-          });
-        } catch (finalError) {
-          console.error("Final attempt failed:", finalError);
-          return res.status(400).json({
-            success: false,
-            message: "Failed to create student after multiple attempts. Please try again."
-          });
-        }
+        return res.status(400).json({
+          success: false,
+          message: "Failed to create student after a retry. Please try again."
+        });
       }
     }
     

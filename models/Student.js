@@ -48,13 +48,18 @@ const studentSchema = new mongoose.Schema({
 async function getSchoolPrefix(schoolId) {
   try {
     const School = mongoose.model("School");
-    const school = await School.findById(schoolId).select("name code shortCode schoolCode");
-    const source =
-      school?.code || school?.shortCode || school?.schoolCode || school?.name || "";
-    const cleaned = source.toString().replace(/[^a-zA-Z]/g, "").toUpperCase();
-    return cleaned.slice(0, 4) || String(schoolId).slice(-4).toUpperCase();
+    const school = await School.findById(schoolId).select("schoolCode name code shortCode");
+    // schoolCode is generated once at school creation and is already
+    // enforced unique by the School schema itself — using it here means
+    // two schools can NEVER collide on a prefix, even with near-identical
+    // names like "Adonai High School" vs "Adonai Primary School (Birembo)"
+    // vs "Adonai Primary School (Kami)", which name-derived letters cannot
+    // tell apart (all three used to reduce to "ADON").
+    const source = school?.schoolCode || school?.code || school?.shortCode || school?.name || "";
+    const cleaned = source.toString().replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+    return cleaned.slice(0, 10) || String(schoolId).slice(-6).toUpperCase();
   } catch {
-    return String(schoolId).slice(-4).toUpperCase();
+    return String(schoolId).slice(-6).toUpperCase();
   }
 }
 
