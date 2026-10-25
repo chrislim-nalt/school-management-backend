@@ -164,6 +164,34 @@ studentSchema.statics.getNextStudentId = async function (schoolId, maxRetries = 
   return finalId;
 };
 
+// Static method used by the Excel import: reserve `count` consecutive IDs in ONE
+// query instead of asking for them one by one. Deleted students are included
+// on purpose, because the unique index (school + studentId) still counts them.
+// Only normal 1-6 digit numbers are considered, so a one-off timestamp-style
+// fallback ID can never push the numbering to a huge value.
+studentSchema.statics.generateBulkStudentIds = async function (schoolId, count) {
+  const prefix = await getSchoolPrefix(schoolId);
+  const existing = await this.find({
+    school: schoolId,
+    studentId: { $regex: new RegExp(`^${prefix}-STD-\\d{1,6}$`) }
+  }).select("studentId").lean();
+
+  let maxId = 0;
+  for (const s of existing) {
+    const match = s.studentId && s.studentId.match(/(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (!isNaN(num) && num > maxId) maxId = num;
+    }
+  }
+
+  const ids = [];
+  for (let i = 1; i <= count; i++) {
+    ids.push(`${prefix}-STD-${String(maxId + i).padStart(4, "0")}`);
+  }
+  return ids;
+};
+
 // Indexes — uniqueness now enforced per school, backed up by prefixed IDs
 studentSchema.index({ school: 1, studentId: 1 }, { unique: true });
 studentSchema.index({ school: 1, grade: 1, className: 1 });

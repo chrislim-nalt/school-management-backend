@@ -11,6 +11,7 @@ router.use(authMiddleware);
 router.get("/", authorize("superadmin", "school_admin", "teacher"), studentController.getStudents);
 router.get("/:id", authorize("superadmin", "school_admin", "teacher"), studentController.getStudentById);
 router.post("/", authorize("superadmin", "school_admin"), studentController.createStudent);
+router.post("/import", authorize("superadmin", "school_admin"), studentController.importStudents);
 router.put("/:id", authorize("superadmin", "school_admin"), studentController.updateStudent);
 router.delete("/:id", authorize("superadmin", "school_admin"), studentController.deleteStudent);
 router.get("/:id/performance", authorize("superadmin", "school_admin", "teacher"), studentController.getStudentPerformance);
